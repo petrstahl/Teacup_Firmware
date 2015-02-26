@@ -10,14 +10,26 @@ class MiscellaneousPage(wx.Panel, Page):
     self.id = idPg
     self.font = font
     
-    self.labels = { 'USE_INTERNAL_PULLUPS': "Use Internal Pullups", 'EECONFIG': "Enable EEPROM Storage", 'DEBUG': "Turn on Debugging", 'BANG_BANG': "Enable",
-                    'BANG_BANG_ON': "On PWM Level:", 'BANG_BANG_OFF': "Off PWM Level:", 'REPORT_TARGET_TEMPS': "Report Target Temperatures",
-                    'MOVEBUFFER_SIZE': "Move buffer Size:", 'DC_EXTRUDER': "Heater:", 'DC_EXTRUDER_PWM': "PWM:",
-                    'USE_WATCHDOG': "Use the Watchdog Timer", 'REFERENCE': "Analog Reference:",
-                    'TH_COUNT': "Temperature History Size:", 'FAST_PWM': "Fast PWM", 'ENDSTOP_STEPS': "Endstop Steps:", 'PID_SCALE': "PID Scaling Factor:",
-                    'TEMP_HYSTERESIS': "Temperature Hysteresis:", 'TEMP_RESIDENCY_TIME': "Temperature Residency Time:",  'TEMP_EWMA': "Temperature EWMA:",
-                    'HEATER_SANITY_CHECK': "Heater Sanity Check" }
-    
+    self.labels = {'USE_INTERNAL_PULLUPS': "Use Internal Pullups",
+                   'EECONFIG': "Enable EEPROM Storage",
+                   'DEBUG': "Turn on Debugging",
+                   'BANG_BANG': "Enable",
+                   'BANG_BANG_ON': "On PWM Level:",
+                   'BANG_BANG_OFF': "Off PWM Level:",
+                   'REPORT_TARGET_TEMPS': "Report Target Temperatures",
+                   'MOVEBUFFER_SIZE': "Movebuffer Size:",
+                   'DC_EXTRUDER': "Heater:", 'DC_EXTRUDER_PWM': "PWM:",
+                   'USE_WATCHDOG': "Use the Watchdog Timer",
+                   'REFERENCE': "Analog Reference:",
+                   'TH_COUNT': "Temperature History Size:",
+                   'FAST_PWM': "Fast PWM",
+                   'ENDSTOP_STEPS': "Endstop Steps:",
+                   'PID_SCALE': "PID Scaling Factor:",
+                   'TEMP_HYSTERESIS': "Temperature Hysteresis:",
+                   'TEMP_RESIDENCY_TIME': "Temperature Residency Time:",
+                   'TEMP_EWMA': "Temperature EWMA:",
+                   'HEATER_SANITY_CHECK': "Heater Sanity Check"}
+
     self.heaterNameNone = "<none>"
     self.heaterNames = [self.heaterNameNone]
     self.boardHeaters = []

@@ -9,7 +9,6 @@
   CPU types a user should be able to choose from in configtool. All
   commented out.
 */
-//#define CPU_TYPE atmega1280
 //#define CPU_TYPE atmega2560
 
 /** \def CPU
@@ -48,38 +47,38 @@
 #define X_STEP_PIN               DIO54
 #define X_DIR_PIN                DIO55
 #define X_MIN_PIN                DIO3
-//#define X_MAX_PIN                DIO2
+//#define X_MAX_PIN                xxxx
 #define X_ENABLE_PIN             DIO38
 //#define X_INVERT_DIR
 //#define X_INVERT_MIN
 //#define X_INVERT_MAX
-//#define X_INVERT_ENABLE
+#define X_INVERT_ENABLE
 
 #define Y_STEP_PIN               DIO60
 #define Y_DIR_PIN                DIO61
 #define Y_MIN_PIN                DIO14
-//#define Y_MAX_PIN                DIO15
+//#define Y_MAX_PIN                xxxx
 #define Y_ENABLE_PIN             DIO56
 //#define Y_INVERT_DIR
 //#define Y_INVERT_MIN
 //#define Y_INVERT_MAX
-//#define Y_INVERT_ENABLE
+#define Y_INVERT_ENABLE
 
 #define Z_STEP_PIN               DIO46
 #define Z_DIR_PIN                DIO48
 #define Z_MIN_PIN                DIO18
-//#define Z_MAX_PIN                DIO19
-#define Z_ENABLE_PIN             AIO8
+//#define Z_MAX_PIN                xxxx
+#define Z_ENABLE_PIN             DIO63
 //#define Z_INVERT_DIR
 //#define Z_INVERT_MIN
 //#define Z_INVERT_MAX
-//#define Z_INVERT_ENABLE
+#define Z_INVERT_ENABLE
 
 #define E_STEP_PIN               DIO26
 #define E_DIR_PIN                DIO28
 #define E_ENABLE_PIN             DIO24
 //#define E_INVERT_DIR
-//#define E_INVERT_ENABLE
+#define E_INVERT_ENABLE
 
 //#define PS_ON_PIN                xxxx
 //#define PS_MOSFET_PIN            xxxx
@@ -142,10 +141,10 @@
   For a GEN3 set temp_type to TT_INTERCOM and temp_pin to AIO0. The pin
   won't be used in this case.
 */
-//                 name       type            pin    additional
+//                 name      type           pin    additional
 //DEFINE_TEMP_SENSORS_START
 DEFINE_TEMP_SENSOR(extruder, TT_THERMISTOR, AIO13, THERMISTOR_EXTRUDER)
-DEFINE_TEMP_SENSOR(bed, TT_THERMISTOR, AIO14, THERMISTOR_BED)
+DEFINE_TEMP_SENSOR(bed,      TT_THERMISTOR, AIO14, THERMISTOR_BED)
 // TEMP_TABLE BED (10000,4092,4700,5.0)
 // TEMP_TABLE EXTRUDER (10000,4092,4700,5.0)
 //DEFINE_TEMP_SENSORS_END
@@ -165,9 +164,9 @@ DEFINE_TEMP_SENSOR(bed, TT_THERMISTOR, AIO14, THERMISTOR_BED)
   Heater pins a user should be able to choose from in configtool. All
   commented out.
 */
-//#define HEATER_PIN DIO10
 //#define HEATER_PIN DIO8
 //#define HEATER_PIN DIO9
+//#define HEATER_PIN DIO10
 
 /** \def DEFINE_HEATER
   Define your heaters and devices here.
@@ -198,11 +197,13 @@ DEFINE_TEMP_SENSOR(bed, TT_THERMISTOR, AIO14, THERMISTOR_BED)
 */
 //            name      port   pwm
 //DEFINE_HEATERS_START
-DEFINE_HEATER(extruder, DIO8, 1)
-DEFINE_HEATER(bed, DIO9, 1)
+DEFINE_HEATER(extruder, DIO10, 1)
+DEFINE_HEATER(bed,      DIO9,  1)
+DEFINE_HEATER(fan,      DIO8,  1)
 
 #define HEATER_EXTRUDER HEATER_extruder
 #define HEATER_BED HEATER_bed
+#define HEATER_FAN HEATER_fan
 //DEFINE_HEATERS_END
 
 

@@ -119,4 +119,3 @@ class AccelerationPage(wx.Panel, Page):
     else:
       self.checkBoxes[k].SetValue(False)
     self.assertModified(False)
-

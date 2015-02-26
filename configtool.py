@@ -116,7 +116,6 @@ class ConfigFrame(wx.Frame):
     self.Bind(wx.EVT_MENU, self.onLoadConfig, id = ID_LOAD_CONFIG)
     file_menu.Enable(ID_LOAD_CONFIG, False)
 
-
     file_menu.Append(ID_SAVE_CONFIG, "Save config.h", "Save config.h file.")
     self.Bind(wx.EVT_MENU, self.onSaveConfig, id = ID_SAVE_CONFIG)
     file_menu.Enable(ID_SAVE_CONFIG, False)

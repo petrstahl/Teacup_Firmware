@@ -9,22 +9,18 @@
   CPU types a user should be able to choose from in configtool. All
   commented out.
 */
-//#define CPU_TYPE atmega644
 //#define CPU_TYPE atmega644p
-//#define CPU_TYPE atmega1284
-//#define CPU_TYPE atmega1284p
 
 /** \def CPU
   CPU actually present on the board.
 */
-#define CPU                      atmega644
+#define CPU                      atmega644p
 
 /** \def F_CPU_OPT
   CPU clock frequencies a user should be able to choose from in configtool.
   All commented out.
 */
 //#define F_CPU_OPT 16000000UL
-//#define F_CPU_OPT 20000000UL
 
 /** \def F_CPU
   Actual CPU clock rate. #ifndef required for Arduino compatibility.
@@ -51,7 +47,7 @@
 #define X_STEP_PIN               DIO15
 #define X_DIR_PIN                DIO18
 #define X_MIN_PIN                DIO20
-#define X_MAX_PIN                DIO21
+//#define X_MAX_PIN                DIO21
 #define X_ENABLE_PIN             DIO19
 //#define X_INVERT_DIR
 #define X_INVERT_MIN
@@ -60,19 +56,19 @@
 
 #define Y_STEP_PIN               DIO23
 #define Y_DIR_PIN                DIO22
-#define Y_MIN_PIN                AIO6
-#define Y_MAX_PIN                AIO5
-#define Y_ENABLE_PIN             AIO7
+#define Y_MIN_PIN                DIO25
+//#define Y_MAX_PIN                DIO26
+#define Y_ENABLE_PIN             DIO24
 //#define Y_INVERT_DIR
 #define Y_INVERT_MIN
 #define Y_INVERT_MAX
 #define Y_INVERT_ENABLE
 
-#define Z_STEP_PIN               AIO4
-#define Z_DIR_PIN                AIO3
-#define Z_MIN_PIN                AIO1
-#define Z_MAX_PIN                AIO0
-#define Z_ENABLE_PIN             AIO2
+#define Z_STEP_PIN               DIO27
+#define Z_DIR_PIN                DIO28
+#define Z_MIN_PIN                DIO30
+//#define Z_MAX_PIN                DIO31
+#define Z_ENABLE_PIN             DIO29
 //#define Z_INVERT_DIR
 #define Z_INVERT_MIN
 #define Z_INVERT_MAX
@@ -80,7 +76,7 @@
 
 #define E_STEP_PIN               DIO17
 #define E_DIR_PIN                DIO16
-//#define E_ENABLE_PIN
+//#define E_ENABLE_PIN             xxxx
 //#define E_INVERT_DIR
 //#define E_INVERT_ENABLE
 
@@ -128,8 +124,6 @@
   All commented out.
 */
 //#define TEMP_SENSOR_PIN AIO0
-//#define TEMP_SENSOR_PIN AIO1
-//#define TEMP_SENSOR_PIN AIO7
 
 /** \def DEFINE_TEMP_SENSOR
   Define your temperature sensors here. One line for each sensor, only
@@ -146,13 +140,10 @@
   For a GEN3 set temp_type to TT_INTERCOM and temp_pin to AIO0. The pin
   won't be used in this case.
 */
-//                 name       type            pin    additional
+//                 name      type           pin    additional
 //DEFINE_TEMP_SENSORS_START
-DEFINE_TEMP_SENSOR(noheater, TT_INTERCOM, AIO0, 0)
-DEFINE_TEMP_SENSOR(bed, TT_INTERCOM, AIO1, 0)
+DEFINE_TEMP_SENSOR(noheater, TT_INTERCOM,   AIO0,  0)
 //DEFINE_TEMP_SENSORS_END
-
-#define HEATER_bed HEATER_noheater
 
 
 /***************************************************************************\
@@ -169,9 +160,6 @@ DEFINE_TEMP_SENSOR(bed, TT_INTERCOM, AIO1, 0)
   Heater pins a user should be able to choose from in configtool. All
   commented out.
 */
-//#define HEATER_PIN DIO3
-//#define HEATER_PIN DIO4
-//#define HEATER_PIN DIO5
 
 /** \def DEFINE_HEATER
   Define your heaters and devices here.
@@ -206,7 +194,6 @@ DEFINE_TEMP_SENSOR(bed, TT_INTERCOM, AIO1, 0)
 //DEFINE_HEATERS_END
 
 
-#define HEATER_BED 1
 /***************************************************************************\
 *                                                                           *
 * 5. COMMUNICATION OPTIONS                                                  *

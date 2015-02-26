@@ -15,7 +15,7 @@
 /** \def CPU
   CPU actually present on the board.
 */
-#define CPU atmega2560
+#define CPU                      atmega2560
 
 /** \def F_CPU_OPT
   CPU clock frequencies a user should be able to choose from in configtool.
@@ -27,7 +27,7 @@
   Actual CPU clock rate. #ifndef required for Arduino compatibility.
 */
 #ifndef F_CPU
-  #define F_CPU                  16000000UL
+#define F_CPU                    16000000UL
 #endif
 
 /** \def MOTHERBOARD
@@ -69,7 +69,7 @@
 #define Z_DIR_PIN                DIO48
 #define Z_MIN_PIN                DIO18
 //#define Z_MAX_PIN                DIO19
-#define Z_ENABLE_PIN             AIO8
+#define Z_ENABLE_PIN             DIO62
 //#define Z_INVERT_DIR
 //#define Z_INVERT_MIN
 //#define Z_INVERT_MAX
@@ -143,10 +143,10 @@
   For a GEN3 set temp_type to TT_INTERCOM and temp_pin to AIO0. The pin
   won't be used in this case.
 */
-//                 name       type            pin    additional
+//                 name      type           pin    additional
 //DEFINE_TEMP_SENSORS_START
-DEFINE_TEMP_SENSOR(extruder,  TT_THERMISTOR,  AIO13, THERMISTOR_EXTRUDER)
-DEFINE_TEMP_SENSOR(bed,       TT_THERMISTOR,  AIO14, THERMISTOR_BED)
+DEFINE_TEMP_SENSOR(extruder, TT_THERMISTOR, AIO13, THERMISTOR_EXTRUDER)
+DEFINE_TEMP_SENSOR(bed,      TT_THERMISTOR, AIO14, THERMISTOR_BED)
 // TEMP_TABLE BED (10000,4092,4700,5.0)
 // TEMP_TABLE EXTRUDER (10000,4092,4700,5.0)
 //DEFINE_TEMP_SENSORS_END
@@ -166,11 +166,11 @@ DEFINE_TEMP_SENSOR(bed,       TT_THERMISTOR,  AIO14, THERMISTOR_BED)
   Heater pins a user should be able to choose from in configtool. All
   commented out.
 */
-//#define HEATER_PIN DIO10
-//#define HEATER_PIN DIO9
-//#define HEATER_PIN DIO8
-//#define HEATER_PIN DIO5
 //#define HEATER_PIN DIO4
+//#define HEATER_PIN DIO5
+//#define HEATER_PIN DIO8
+//#define HEATER_PIN DIO9
+//#define HEATER_PIN DIO10
 
 /** \def DEFINE_HEATER
   Define your heaters and devices here.
