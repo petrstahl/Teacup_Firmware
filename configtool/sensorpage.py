@@ -1,6 +1,6 @@
 import wx
 from configtool.page import Page
-from configtool.data import pinNames, BSIZESMALL
+from configtool.data import pinNames, BSIZESMALL, reSensorData
 from sensorlist import SensorList
 from addsensordlg import AddSensorDlg
 
@@ -41,6 +41,14 @@ class SensorsPage(wx.Panel, Page):
     bsz.Add(self.bAdd)
     
     bsz.AddSpacer((10, 10))
+    self.bModify = wx.Button(self, wx.ID_ANY, "Modify", size = BSIZESMALL)
+    self.bModify.SetFont(font)
+    self.bModify.Enable(False)
+    self.Bind(wx.EVT_BUTTON, self.doModify, self.bModify)
+    bsz.Add(self.bModify)
+    self.bModify.SetToolTipString("Modify the selected temperature sensor.")
+
+    bsz.AddSpacer((10, 10))
     self.bDelete = wx.Button(self, wx.ID_ANY, "Delete", size = BSIZESMALL)
     self.bDelete.SetFont(font)
     self.bDelete.Enable(False)
@@ -58,8 +66,10 @@ class SensorsPage(wx.Panel, Page):
     self.selection = n
     if n is None:
       self.bDelete.Enable(False)
+      self.bModify.Enable(False)
     else:
       self.bDelete.Enable(True)
+      self.bModify.Enable(True)
       
   def doAdd(self, evt):
     nm = []
@@ -81,6 +91,48 @@ class SensorsPage(wx.Panel, Page):
     self.validateTable()
     self.assertModified(True)
       
+  def doModify(self, evt):
+    if self.selection is None:
+      return
+    nm = []
+    for s in self.sensors:
+      nm.append(s[0])
+    
+    r0 = ""
+    beta = ""
+    r2 = ""
+    vadc = ""
+
+    s = self.sensors[self.selection]
+    if len(s) > 3 and s[3].startswith('('):
+      m = reSensorData.match(s[3])
+      if m:
+        t = m.groups()
+        if len(t) == 4:
+          r0 = t[0]
+          beta = t[1]
+          r2 = t[2]
+          vadc = t[3]
+    dlg = AddSensorDlg(self, nm, self.validPins, self.font,
+                       name=s[0], stype=s[1], pin=s[2],
+                       r0=r0, beta=beta, r2=r2, vadc=vadc,
+                       modify=True)
+    rc = dlg.ShowModal()
+    if rc == wx.ID_OK:
+      tt = dlg.getValues()
+      
+    dlg.Destroy()
+    
+    if rc != wx.ID_OK:
+      return
+    
+    self.assertModified(True)
+    
+    self.sensors[self.selection] = tt
+    self.lb.updateList(self.sensors)
+    self.validateTable()
+    self.assertModified(True)
+    
   def doDelete(self, evt):
     if self.selection is None:
       return

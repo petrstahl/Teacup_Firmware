@@ -48,6 +48,7 @@ reCandHeatPins = re.compile("^\s*//\s*#define\s+HEATER_PIN\s+(\w+)")
 reCandThermPins = re.compile("^\s*//\s*#define\s+TEMP_SENSOR_PIN\s+(\w+)")
 reCandProcessors = re.compile("^\s*//\s*#define\s+CPU_TYPE\s+(\w+)")
 reCandCPUClocks = re.compile("^\s*//\s*#define\s+F_CPU_OPT\s+(\w+)")
+reTempTable = re.compile("^\s*//\s*TEMP_TABLE\s+(\S+)\s+(\\(.*\\))")
 
 reHelpTextStart = re.compile("^\s*/\*\*\s+\\\\def\s+(.*)")
 reHelpTextEnd = re.compile("^\s*\*/")
@@ -58,6 +59,8 @@ reHeater = re.compile(".*\\(\s*(\w+)\s*,\s*(\w+)\s*,\s*(\w+)\s*\\)")
 
 reInteger = re.compile("^\d+U?L?$")
 reFloat = re.compile("^\d+(\.\d*)?$")
+
+reSensorData = re.compile("\\((\d+),(\d+),(\d+),(\d*\.*\d+)")
 
 defineValueFormat =      "#define %-24s %s\n"
 defineBoolFormat =       "#define %s\n"

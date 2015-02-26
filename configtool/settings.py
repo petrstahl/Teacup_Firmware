@@ -18,12 +18,18 @@ class Settings:
     self.objcopyflags = ""
     self.programmer = "wiring"
     self.port = "/dev/ttyACM0"
+
+    self.t0 = 25;
+    self.r1 = 0;
+    self.numTemps = 25
+    self.maxAdc = 1023
+    self.minAdc = 1
     
     self.cfg = ConfigParser.ConfigParser()
     self.cfg.optionxform = str
     if not self.cfg.read(self.inifile):
       print "Settings file %s does not exist. Using default values." % INIFILE
-      
+      self.saveSettings()
       return
 
     if self.cfg.has_section(self.section):
@@ -41,10 +47,22 @@ class Settings:
           self.port = value
         elif opt == "objcopyflags":
           self.objcopyflags = value
+        elif opt == "t0":
+          self.t0 = value
+        elif opt == "r1":
+          self.r1 = value
+        elif opt == "numtemps":
+          self.numTemps = value
+        elif opt == "maxadc":
+          self.maxAdc = value
+        elif opt == "minadc":
+          self.minAdc = value
         else:
           print "Unknown %s option: %s - ignoring." % (self.section, opt)
     else:
       print "Missing %s section - assuming defaults." % self.section
+
+    self.saveSettings()
       
   def saveSettings(self):
     self.section = "configtool"  
@@ -59,6 +77,11 @@ class Settings:
     self.cfg.set(self.section, "objcopyflags", str(self.objcopyflags))
     self.cfg.set(self.section, "programmer", str(self.programmer))
     self.cfg.set(self.section, "port", str(self.port))
+    self.cfg.set(self.section, "t0", str(self.t0))
+    self.cfg.set(self.section, "r1", str(self.r1))
+    self.cfg.set(self.section, "numtemps", str(self.numTemps))
+    self.cfg.set(self.section, "maxadc", str(self.maxAdc))
+    self.cfg.set(self.section, "minadc", str(self.minAdc))
 
     try:    
       cfp = open(self.inifile, 'wb')

@@ -40,6 +40,8 @@ class ConfigFrame(wx.Frame):
     self.heaters = []
     self.savePrtEna = False
     self.saveBrdEna = False
+    self.protPrtFile = False
+    self.protBrdFile = False
 
     sz = wx.BoxSizer(wx.HORIZONTAL)
 
@@ -182,34 +184,33 @@ class ConfigFrame(wx.Frame):
 
     menu_bar.Append(build_menu, "&Build")
 
-    edit_menu = wx.Menu()
-
-    edit_menu.Append(ID_SETTINGS, 'settings', 'change settings')
-    self.Bind(wx.EVT_MENU, self.onEditSettings, id=ID_SETTINGS)
-
-    self.editMenu = edit_menu
-
-    menu_bar.Append(edit_menu, '&Edit')
-
     self.SetMenuBar(menu_bar)
     self.checkEnableLoadConfig()
     self.checkEnableUpload()
 
   def onSaveBoardConfig(self, evt):
-    self.pgBoard.onSaveConfig(evt)
-    self.checkEnableLoadConfig()
+    rc = self.pgBoard.onSaveConfig(evt)
+    if rc: 
+      self.checkEnableLoadConfig()
+    return rc
 
   def onSaveBoardConfigAs(self, evt):
-    self.pgBoard.onSaveConfigAs(evt)
-    self.checkEnableLoadConfig()
+    rc = self.pgBoard.onSaveConfigAs(evt)
+    if rc:
+      self.checkEnableLoadConfig()
+    return rc
 
   def onSavePrinterConfig(self, evt):
-    self.pgPrinter.onSaveConfig(evt)
-    self.checkEnableLoadConfig()
+    rc = self.pgPrinter.onSaveConfig(evt)
+    if rc:
+      self.checkEnableLoadConfig()
+    return rc
 
   def onSavePrinterConfigAs(self, evt):
-    self.pgPrinter.onSaveConfigAs(evt)
-    self.checkEnableLoadConfig()
+    rc = self.pgPrinter.onSaveConfigAs(evt)
+    if rc:
+      self.checkEnableLoadConfig()
+    return rc
 
   def checkEnableLoadConfig(self):
     fn = os.path.join(cmd_folder, "config.h")
@@ -231,6 +232,7 @@ class ConfigFrame(wx.Frame):
     self.fileMenu.Enable(ID_SAVE_PRINTER, saveFlag)
     self.fileMenu.Enable(ID_SAVE_PRINTER_AS, saveAsFlag)
     self.savePrtEna = saveAsFlag
+    self.protPrtFile = not saveFlag
     if self.savePrtEna and self.saveBrdEna:
       self.enableSaveConfig(True)
     else:
@@ -240,6 +242,7 @@ class ConfigFrame(wx.Frame):
     self.fileMenu.Enable(ID_SAVE_BOARD, saveFlag)
     self.fileMenu.Enable(ID_SAVE_BOARD_AS, saveAsFlag)
     self.saveBrdEna = saveAsFlag
+    self.protBrdFile = not saveFlag
     if self.savePrtEna and self.saveBrdEna:
       self.enableSaveConfig(True)
     else:
@@ -253,24 +256,29 @@ class ConfigFrame(wx.Frame):
 
   def loadConfigFile(self, fn):
     if not self.pgPrinter.confirmLoseChanges("load config"):
-      return
+      return False
 
     if not self.pgBoard.confirmLoseChanges("Load config"):
-      return
+      return False
 
     pfile, bfile = self.getConfigFileNames(fn)
 
     if not pfile:
       self.message("Config file did not contain a printer file include statement", "Config Error")
+      return False
     else:
       if not self.pgPrinter.loadConfigFile(pfile):
         self.message("There was a problem loading the printer config file\n%s" % pfile, "Config Error")
+        return False
 
     if not bfile:
       self.message("Config file did not contain a board file include statement", "Config Error")
+      return False
     else:
       if not self.pgBoard.loadConfigFile(bfile):
         self.message("There was a problem loading the board config file\n%s" % bfile, "Config Error")
+        return False
+    return True
 
   def getConfigFileNames(self, fn):
     pfile = None
@@ -311,22 +319,25 @@ class ConfigFrame(wx.Frame):
     return pfile, bfile
 
   def onSaveConfig(self, evt):
+    self.saveConfigFile()
+
+  def saveConfigFile(self):
     fn = os.path.join(cmd_folder, "config.h")
     try:
       fp = open(fn, 'w')
     except:
       self.message("Unable to open config.h for output.", "File error")
-      return
+      return False
 
     bfn = self.pgBoard.getFileName()
     if self.pgBoard.isModified() and self.pgBoard.isValid():
       if not self.pgBoard.saveConfigFile(bfn):
-        return
+        return False
 
     pfn = self.pgPrinter.getFileName()
     if self.pgPrinter.isModified() and self.pgPrinter.isValid():
       if not self.pgPrinter.saveConfigFile(pfn):
-        return
+        return False
 
     prefix = cmd_folder + os.path.sep
     lpfx = len(prefix)
@@ -353,6 +364,7 @@ class ConfigFrame(wx.Frame):
     self.message("config.h successfully saved", "Save configuration success", wx.OK + wx.ICON_INFORMATION)
 
     self.checkEnableLoadConfig()
+    return True
 
   def onBuild(self, evt):
     self.onBuildorUpload(True)
@@ -383,7 +395,12 @@ class ConfigFrame(wx.Frame):
         if rc != wx.ID_YES:
           return
 
-        self.onSavePrinterConfig(None)
+        if self.protPrtFile:
+          rc = self.onSavePrinterConfigAs(None)
+        else:
+          rc = self.onSavePrinterConfig(None)
+        if not rc:
+          return
 
       if self.pgBoard.isModified():
         dlg = wx.MessageDialog(self, "Board data needs to be saved. Click "
@@ -395,20 +412,30 @@ class ConfigFrame(wx.Frame):
         if rc != wx.ID_YES:
           return
 
-        self.onSaveBoardConfig(None)
-
-      if not self.verifyConfigLoaded():
-        dlg = wx.MessageDialog(self, "Loaded configuration does not match what "
-          "the config.h file. Click Yes to load "
-          "config.h.",
-          "Incorrect data loaded",
-          wx.YES_NO | wx.NO_DEFAULT | wx.ICON_INFORMATION)
-        rc = dlg.ShowModal()
-        dlg.Destroy()
-        if rc != wx.ID_YES:
+        if self.protBrdFile:
+          rc = self.onSaveBoardConfigAs(None)
+        else:
+          rc = self.onSaveBoardConfig(None)
+        if not rc:
           return
 
-        self.loadConfigFile("config.h")
+      if not self.verifyConfigLoaded():
+        dlg = wx.MessageDialog(self, "Loaded configuration does not match "
+          "the config.h file.\nClick Yes to load "
+          "config.h.\nor No to save current configuration to config.h",
+          "Incorrect data loaded",
+          wx.YES_NO | wx.CANCEL | wx.NO_DEFAULT | wx.ICON_INFORMATION)
+        rc = dlg.ShowModal()
+        dlg.Destroy()
+        if rc == wx.ID_CANCEL:
+          return
+
+        if rc == wx.ID_YES:
+          if not self.loadConfigFile("config.h"):
+            return
+        else:
+          if not self.saveConfigFile():
+            return
 
     f_cpu, cpu, baud = self.pgBoard.getCPUInfo()
     if not cpu:
@@ -471,7 +498,7 @@ class ConfigFrame(wx.Frame):
 
 
 if __name__ == '__main__':
-  app = wx.PySimpleApp()
+  app = wx.App(False)
   frame = ConfigFrame()
   frame.Show(True)
   app.MainLoop()

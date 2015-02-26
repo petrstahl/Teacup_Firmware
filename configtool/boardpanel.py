@@ -2,15 +2,16 @@ import os
 import wx
 import re
 
-from configtool.data import (defineValueFormat, defineBoolFormat, defineHeaterFormat, reCommDefBL, reCommDefBoolBL, reHelpTextStart, reHelpTextEnd,
+from configtool.data import (defineValueFormat, defineBoolFormat, defineHeaterFormat, reCommDefBL, reCommDefBoolBL, reHelpTextStart, reHelpTextEnd, reSensorData,
                              reStartSensors, reEndSensors, reStartHeaters, reEndHeaters, reCandHeatPins, reCandThermPins, reCandProcessors, reCandCPUClocks, reFloatAttr,
-                             reDefine, reDefineBL, reDefQS, reDefQSm, reDefQSm2, reDefBool, reDefBoolBL, reDefHT, reDefTS, reHeater, reSensor3, reSensor4)
+                             reDefine, reDefineBL, reDefQS, reDefQSm, reDefQSm2, reDefBool, reDefBoolBL, reDefHT, reDefTS, reHeater, reSensor3, reSensor4, reTempTable)
 from configtool.pinoutspage import PinoutsPage
 from configtool.sensorpage import SensorsPage
 from configtool.heaterspage import HeatersPage
 from configtool.communicationspage import CommunicationsPage
 from configtool.cpupage import CpuPage
 from configtool.protectedfiles import protectedFiles
+from configtool.temptable import generateTempTables
   
 class BoardPanel(wx.Panel):
   def __init__(self, parent, nb, settings):
@@ -218,6 +219,7 @@ class BoardPanel(wx.Panel):
     self.candThermPins = []
     self.candProcessors = []
     self.candClocks = []
+    tempTables = {}
     gatheringHelpText = False
     helpTextString = ""
     helpKey = None
@@ -284,6 +286,13 @@ class BoardPanel(wx.Panel):
             self.candClocks.append(t[0])
             continue
 
+        m = reTempTable.match(ln)
+        if m:
+          t = m.groups()
+          if len(t) == 2:
+            tempTables[t[0]] = t[1]
+            continue
+
         continue
       
       if ln.lstrip().startswith("#define"):
@@ -336,6 +345,11 @@ class BoardPanel(wx.Panel):
               self.heaters.append(s)
             continue
 
+    for k in range(len(self.sensors)):
+      tn = self.sensors[k][0].upper()
+      if tn in tempTables.keys():
+        self.sensors[k][3] = tempTables[tn]
+
     if os.path.basename(fn) in protectedFiles:
       self.parent.enableSaveBoard(False, True)
       self.protFileLoaded = True
@@ -362,12 +376,12 @@ class BoardPanel(wx.Panel):
     if m:
       t = m.groups()
       if len(t) == 4:
-        return t
+        return list(t)
     m = reSensor3.search(s)
     if m:
       t = m.groups()
       if len(t) == 3:
-        return t
+        return list(t)
     return None
   
   def parseHeater(self, s):
@@ -375,12 +389,12 @@ class BoardPanel(wx.Panel):
     if m:
       t = m.groups()
       if len(t) == 3:
-        return t
+        return list(t)
     return None
   
   def onSaveConfig(self, evt):
     path = self.configFile
-    self.saveConfigFile(path)
+    return self.saveConfigFile(path)
 
   def onSaveConfigAs(self, evt):
     wildcard = "Board configuration (board.*.h)|board.*.h"
@@ -398,10 +412,12 @@ class BoardPanel(wx.Panel):
     path = dlg.GetPath()
     dlg.Destroy()
         
-    if self.saveConfigFile(path):
+    rc = self.saveConfigFile(path)
+    if rc:
       self.parent.setBoardTabFile(os.path.basename(path))
       self.protFileLoaded = False
       self.parent.enableSaveBoard(True, True)
+    return rc
   
   def saveConfigFile(self, path):
     if os.path.basename(path) in protectedFiles:
@@ -447,13 +463,23 @@ class BoardPanel(wx.Panel):
     
     skipToSensorEnd = False
     skipToHeaterEnd = False
+    tempTables = {}
     for ln in self.cfgBuffer:
       m = reStartSensors.match(ln)
       if m:
         fp.write(ln)
+	ttString = ""
         for s in self.sensors:
-          sstr = ", ".join(s)
+          sstr = ", ".join(s[0:3])
+          if len(s) > 2:
+            if s[3].startswith('('):
+              sstr += ", THERMISTOR_%s" % s[0].upper()
+              ttString += "// TEMP_TABLE %s %s\n" % (s[0].upper(), s[3])
+              tempTables[s[0].upper()] = s[3]
+            else:
+              sstr += ", " + s[3]
           fp.write("DEFINE_TEMP_SENSOR(%s)\n" % sstr)
+        fp.write(ttString)
         skipToSensorEnd = True
         continue
       
@@ -566,6 +592,15 @@ class BoardPanel(wx.Panel):
     
     dlg = wx.MessageDialog(self, "File %s successfully written" % path,
         "Save Successful", wx.OK + wx.ICON_INFORMATION)
+    dlg.ShowModal()
+    dlg.Destroy()
+
+    if generateTempTables(tempTables, self.settings):
+      dlg = wx.MessageDialog(self, "File ThermistorTable.h successfully written",
+          "Save Successful", wx.OK + wx.ICON_INFORMATION)
+    else:
+      dlg = wx.MessageDialog(self, "Error writing to ThermistorTable.h file",
+                            "File Error", wx.OK + wx.ICON_ERROR)
     dlg.ShowModal()
     dlg.Destroy()
     
