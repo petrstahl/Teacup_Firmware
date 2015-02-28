@@ -249,6 +249,8 @@ int main (void)
 #endif
 	init();
 
+  sersendf_P(PSTR("2 milliseconds = %lu CPU clocks.\n"), (uint32_t)(2 MS));
+
 	// main loop
 	for (;;)
 	{

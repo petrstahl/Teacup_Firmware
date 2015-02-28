@@ -455,6 +455,8 @@ void dda_create(DDA *dda, TARGET *target) {
         }
       }
 
+      dda->move_duration_exact = move_duration;
+      dda->move_duration = dda->delta[X] * dda->step_interval[X];
 		#else
       dda->c = move_duration / target->F;
       if (dda->c < c_limit)
@@ -483,6 +485,7 @@ void dda_create(DDA *dda, TARGET *target) {
 
 	Called both inside and outside of interrupts.
 */
+#include "delay.h"
 void dda_start(DDA *dda) {
 	// called from interrupt context: keep it simple!
 
@@ -498,6 +501,14 @@ void dda_start(DDA *dda) {
 			z_enable();
 		if (dda->endstop_check)
 			endstops_on();
+
+    sersendf_P(PSTR("\ninterval %lu\n"), dda->step_interval[X]);
+    sersendf_P(PSTR("exact %ld  duration %ld\n"), dda->move_duration_exact,
+               dda->move_duration);
+    delay_ms(10);
+    sersendf_P(PSTR(" = %ld ms / %ld ms\n"),
+               dda->move_duration_exact / (F_CPU / 1000),
+               dda->move_duration / (F_CPU / 1000));
 
 		// set direction outputs
 		x_direction(dda->x_direction);
@@ -528,6 +539,7 @@ void dda_start(DDA *dda) {
 
 		// set timeout for first step
     setTimer(dda->c);
+
 	}
 	// else just a speed change, keep dda->live = 0
 
@@ -705,6 +717,12 @@ void dda_step(DDA *dda) {
       ) {
 		dda->live = 0;
     dda->done = 1;
+    sersendf_P(PSTR("exact %ld  duration %ld\n"), dda->move_duration_exact,
+               dda->move_duration);
+    //delay_ms(10);
+    sersendf_P(PSTR(" = %ld ms / %ld ms\n"),
+               dda->move_duration_exact / (F_CPU / 1000),
+               dda->move_duration / (F_CPU / 1000));
     #ifdef LOOKAHEAD
     // If look-ahead was using this move, it could have missed our activation:
     // make sure the ids do not match.
@@ -764,6 +782,10 @@ void dda_clock() {
 
   if (dda == NULL)
     return;
+
+  // No need for atomic, we still have interrupts locked.
+  dda->move_duration_exact -= 2 MS;
+  dda->move_duration -= 2 MS;
 
   // Lengthy calculations ahead!
   // Make sure we didn't re-enter, then allow nested interrupts.
