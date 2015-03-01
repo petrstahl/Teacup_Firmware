@@ -461,6 +461,9 @@ void dda_create(DDA *dda, TARGET *target) {
       dda->c = move_duration / target->F;
       if (dda->c < c_limit)
         dda->c = c_limit;
+
+      dda->move_duration_exact = move_duration;
+      dda->move_duration = dda->delta[X] * dda->c;
 		#endif
 	} /* ! dda->total_steps == 0 */
 
@@ -502,7 +505,11 @@ void dda_start(DDA *dda) {
 		if (dda->endstop_check)
 			endstops_on();
 
-    sersendf_P(PSTR("\ninterval %lu\n"), dda->step_interval[X]);
+    #ifndef ACCELERATION_TEMPORAL
+      sersendf_P(PSTR("\ninterval %lu\n"), dda->c);
+    #else
+      sersendf_P(PSTR("\ninterval %lu\n"), dda->step_interval[X]);
+    #endif
     sersendf_P(PSTR("exact %ld  duration %ld\n"), dda->move_duration_exact,
                dda->move_duration);
     delay_ms(10);
