@@ -7,9 +7,130 @@
 
 #include	"config_wrapper.h"
 
-#ifdef SIMULATOR
-  #include "simulator.h"
+#ifndef MASK
+  /// MASKING- returns \f$2^PIN\f$
+  #define MASK(PIN) (1 << PIN)
 #endif
+
+/** Magic I/O routines, also known as "FastIO".
+
+  Now you can simply SET_OUTPUT(STEP); WRITE(STEP, 1); WRITE(STEP, 0);.
+
+  The point here is to move any pin/port mapping calculations into the
+  preprocessor. This way there is no longer math at runtime neccessary, all
+  instructions melt into a single one with fixed numbers.
+
+  This makes code for setting a pin small, smaller than calling a subroutine.
+  It also make code fast, on AVR a pin can be turned on and off in just two
+  clock cycles.
+*/
+#if defined __AVR__
+
+  #include <avr/io.h>
+
+  /// Read a pin.
+  #define _READ(IO)        (IO ## _RPORT & MASK(IO ## _PIN))
+  /// Write to a pin.
+  #define _WRITE(IO, v) \
+    do { \
+      if (v) { IO ## _WPORT |= MASK(IO ## _PIN); } \
+      else { IO ## _WPORT &= ~MASK(IO ## _PIN); } \
+    } while (0)
+
+  /**
+    Setting pins as input/output: other than with ARMs, function of a pin
+    on AVR isn't given by a dedicated function register, but solely by the
+    on-chip peripheral connected to it. With the peripheral (e.g. UART, SPI,
+    ...) connected, a pin automatically serves with this function. With the
+    peripheral disconnected, it automatically returns to general I/O function.
+  */
+  /// Set pin as input.
+  #define _SET_INPUT(IO)   do { IO ## _DDR &= ~MASK(IO ## _PIN); } while (0)
+  /// Set pin as output.
+  #define _SET_OUTPUT(IO)  do { IO ## _DDR |=  MASK(IO ## _PIN); } while (0)
+
+  /// Enable pullup resistor.
+  #define _PULLUP_ON(IO)   _WRITE(IO, 1)
+  /// Disable pullup resistor.
+  #define _PULLUP_OFF(IO)  _WRITE(IO, 0)
+
+#elif defined __ARMEL__
+
+  /**
+    The LPC1114 supports bit-banding by mapping the bit mask to the address.
+    See chapter 12 in the LPC111x User Manual. A read-modify-write cycle like
+    on AVR costs 5 clock cycles, this implementation works with 3 clock cycles.
+  */
+  /// Read a pin.
+  #define _READ(IO)        (IO ## _PORT->MASKED_ACCESS[MASK(IO ## _PIN)])
+  /// Write to a pin.
+  #define _WRITE(IO, v) \
+    do { \
+      IO ## _PORT->MASKED_ACCESS[MASK(IO ## _PIN)] = \
+        (v) ? MASK(IO ## _PIN) : 0; \
+    } while (0)
+
+  /**
+    Set pins as input/output. On ARM, each pin has its own IOCON register,
+    which allows to set its function and mode. We always set here standard
+    GPIO behavior. Peripherals using these pins may have to change this and
+    should do so in their own context.
+  */
+  /// Set pin as input.
+  #define _SET_INPUT(IO) \
+    do { \
+      LPC_IOCON->IO ## _CMSIS = (IO ## _OUTPUT | IO_MODEMASK_REPEATER); \
+      IO ## _PORT->DIR &= ~MASK(IO ## _PIN); \
+    } while (0)
+  /// Set pin as output.
+  #define _SET_OUTPUT(IO) \
+    do { \
+      LPC_IOCON->IO ## _CMSIS = IO ## _OUTPUT; \
+      IO ## _PORT->DIR |= MASK(IO ## _PIN); \
+    } while (0)
+
+  /// Enable pullup resistor.
+  #define _PULLUP_ON(IO) \
+    do { \
+      LPC_IOCON->IO ## _CMSIS = (IO ## _OUTPUT | IO_MODEMASK_PULLUP); \
+    } while (0)
+  /// Disable pullup resistor.
+  #define _PULLUP_OFF(IO) \
+    do { \
+      LPC_IOCON->IO ## _CMSIS = (IO ## _OUTPUT | IO_MODEMASK_INACTIVE); \
+    } while (0)
+
+#elif defined SIMULATOR
+
+  #include "simulator.h"
+
+  bool _READ(pin_t pin);
+  void _WRITE(pin_t pin, bool on);
+  void _SET_OUTPUT(pin_t pin);
+  void _SET_INPUT(pin_t pin);
+  #define _PULLUP_ON(IO)   _WRITE(IO, 1)
+  #define _PULLUP_OFF(IO)  _WRITE(IO, 0)
+
+#endif /* __AVR__, __ARMEL__, SIMULATOR */
+
+/**
+  Why double up on these macros?
+  See http://gcc.gnu.org/onlinedocs/cpp/Stringification.html
+*/
+/// Read a pin wrapper.
+#define READ(IO)        _READ(IO)
+/// Write to a pin wrapper.
+#define WRITE(IO, v)    _WRITE(IO, v)
+
+/// Set pin as input wrapper.
+#define SET_INPUT(IO)   _SET_INPUT(IO)
+/// Set pin as output wrapper.
+#define SET_OUTPUT(IO)  _SET_OUTPUT(IO)
+
+/// Enable pullup resistor.
+#define PULLUP_ON(IO)   _PULLUP_ON(IO)
+/// Disable pullup resistor.
+#define PULLUP_OFF(IO)  _PULLUP_OFF(IO)
 
 /*
 Power
@@ -29,6 +150,8 @@ inline void power_init(void) {
     SET_OUTPUT(PS_MOSFET_PIN);
   #endif
 }
+
+void pinio_init(void);
 
 void power_on(void);
 void power_off(void);
@@ -230,22 +353,22 @@ static void endstops_on(void) __attribute__ ((always_inline));
 inline void endstops_on(void) {
 	#ifdef USE_INTERNAL_PULLUPS
 		#ifdef X_MIN_PIN
-			WRITE(X_MIN_PIN, 1);
+      PULLUP_ON(X_MIN_PIN);
 		#endif
 		#ifdef X_MAX_PIN
-			WRITE(X_MAX_PIN, 1);
+      PULLUP_ON(X_MAX_PIN);
 		#endif
 		#ifdef Y_MIN_PIN
-			WRITE(Y_MIN_PIN, 1);
+      PULLUP_ON(Y_MIN_PIN);
 		#endif
 		#ifdef Y_MAX_PIN
-			WRITE(Y_MAX_PIN, 1);
+      PULLUP_ON(Y_MAX_PIN);
 		#endif
 		#ifdef Z_MIN_PIN
-			WRITE(Z_MIN_PIN, 1);
+      PULLUP_ON(Z_MIN_PIN);
 		#endif
 		#ifdef Z_MAX_PIN
-			WRITE(Z_MAX_PIN, 1);
+      PULLUP_ON(Z_MAX_PIN);
 		#endif
 	#endif
 }
@@ -254,22 +377,22 @@ static void endstops_off(void) __attribute__ ((always_inline));
 inline void endstops_off(void) {
 	#ifdef USE_INTERNAL_PULLUPS
 		#ifdef X_MIN_PIN
-			WRITE(X_MIN_PIN, 0);
+      PULLUP_OFF(X_MIN_PIN);
 		#endif
 		#ifdef X_MAX_PIN
-			WRITE(X_MAX_PIN, 0);
+      PULLUP_OFF(X_MAX_PIN);
 		#endif
 		#ifdef Y_MIN_PIN
-			WRITE(Y_MIN_PIN, 0);
+      PULLUP_OFF(Y_MIN_PIN);
 		#endif
 		#ifdef Y_MAX_PIN
-			WRITE(Y_MAX_PIN, 0);
+      PULLUP_OFF(Y_MAX_PIN);
 		#endif
 		#ifdef Z_MIN_PIN
-			WRITE(Z_MIN_PIN, 0);
+      PULLUP_OFF(Z_MIN_PIN);
 		#endif
 		#ifdef Z_MAX_PIN
-			WRITE(Z_MAX_PIN, 0);
+      PULLUP_OFF(Z_MAX_PIN);
 		#endif
 	#endif
 }

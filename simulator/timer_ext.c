@@ -4,6 +4,7 @@
 
 #include "dda_queue.h"
 #include "timer.h"
+#include "pinio.h"
 #include "simulator.h"
 #ifdef __MACH__
   #include <mach/mach_time.h>
@@ -161,10 +162,10 @@ static void timer1_isr(void) {
   sei();
 
   // Setup next timer
-  sim_setTimer();
+  sim_timer_set();
 }
 
-void sim_setTimer() {
+void sim_timer_set() {
   // Set callbacks for COMPA and COMPB timers
   uint32_t nextA = 0, nextB = 0;
   uint16_t now = sim_tick_counter();

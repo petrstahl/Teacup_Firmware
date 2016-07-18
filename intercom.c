@@ -4,14 +4,10 @@
 	\brief motherboard <-> extruder board protocol
 */
 
-#ifndef SIMULATOR
-#include	<avr/io.h>
-#include	<avr/interrupt.h>
-#endif
-#include	"memory_barrier.h"
-
 #include	"config_wrapper.h"
+#include "pinio.h"
 #include	"delay.h"
+#include "memory_barrier.h"
 
 #if	 (defined TEMP_INTERCOM) || (defined EXTRUDER)
 #define		INTERCOM_BAUD			57600

@@ -3,6 +3,39 @@
 
 #include <stdint.h>
 
+/**
+  Test configuration.
+*/
+#ifdef __ARMEL__
+  #error Direct USB connection (USB_SERIAL) not yet supported on ARM.
+#endif
+
+/**
+  This file was imported from:
+
+    USB Serial Example for Teensy USB Development Board
+    http://www.pjrc.com/teensy/usb_serial.html
+    Copyright (c) 2008,2010,2011 PJRC.COM, LLC
+    Copyright details see usb_serial.c.
+
+  This means a lot of redundant code here, as well as opportunities for
+  performance improvements. If you want to refactor it, here are some of the
+  more obvious issues:
+
+    - All the serial parameters functions are pointless as such stuff is
+      configurable in Configtool, which means it's hardcoded at runtime.
+
+    - No need for usb_serial_putchar_nowait().
+
+    - No need for usb_serial_flush_input(), usb_serial_flush_output().
+
+    - usb_serial_write() does about the same as serial_writestr() /
+      serial_writestr_P() but isn't used, so either drop it or, if it's
+      faster / smaller, change other code to use it.
+
+    - Macros ATOMIC_START, ATOMIC_END not used.
+*/
+
 // setup
 void usb_init(void);			// initialize everything
 uint8_t usb_configured(void);		// is the USB port configured
@@ -13,7 +46,7 @@ uint8_t usb_serial_available(void);	// number of bytes in receive buffer
 void usb_serial_flush_input(void);	// discard any buffered input
 
 // transmitting data
-int8_t usb_serial_putchar(uint8_t c);	// transmit a character
+void serial_writechar(uint8_t c);             // Transmit a character.
 int8_t usb_serial_putchar_nowait(uint8_t c);  // transmit a character, do not wait
 int8_t usb_serial_write(const uint8_t *buffer, uint16_t size); // transmit a buffer
 void usb_serial_flush_output(void);	// immediately transmit any buffered output
@@ -79,7 +112,7 @@ int8_t usb_serial_set_control(uint8_t signals); // set DSR, DCD, RI, etc
 #define MSB(n) ((n >> 8) & 255)
 
 #if defined(__AVR_AT90USB162__)
-#define HW_CONFIG() 
+#define HW_CONFIG()
 #define PLL_CONFIG() (PLLCSR = ((1<<PLLE)|(1<<PLLP0)))
 #define USB_CONFIG() (USBCON = (1<<USBE))
 #define USB_FREEZE() (USBCON = ((1<<USBE)|(1<<FRZCLK)))

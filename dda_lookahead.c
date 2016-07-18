@@ -11,17 +11,11 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <math.h>
-#ifndef SIMULATOR
-#include <avr/interrupt.h>
-#endif
 
 #include "dda_maths.h"
 #include "dda.h"
 #include "timer.h"
 #include "delay.h"
-#include "serial.h"
-#include "sermsg.h"
-#include "gcode_parse.h"
 #include "dda_queue.h"
 #include "debug.h"
 #include "sersendf.h"
@@ -33,13 +27,6 @@ extern uint8_t use_lookahead;
 uint32_t lookahead_joined = 0;      // Total number of moves joined together
 uint32_t lookahead_timeout = 0;     // Moves that did not compute in time to be actually joined
 
-// Used for look-ahead debugging
-#ifdef LOOKAHEAD_DEBUG_VERBOSE
-  #define serprintf(...) sersendf_P(__VA_ARGS__)
-#else
-  #define serprintf(...)
-#endif
-
 /// \var maximum_jerk_P
 /// \brief maximum allowed feedrate jerk on each axis
 static const axes_uint32_t PROGMEM maximum_jerk_P = {
@@ -50,123 +37,13 @@ static const axes_uint32_t PROGMEM maximum_jerk_P = {
 };
 
 
-// We also need the inverse: given a ramp length, determine the expected speed
-// Note: the calculation is scaled by a factor 16384 to obtain an answer with a smaller
-// rounding error.
-// Warning: this is an expensive function as it requires a square root to get the result.
-//
-uint32_t dda_steps_to_velocity(uint32_t steps) {
-  // v(t) = a*t, with v in mm/s and a = acceleration in mm/s²
-  // s(t) = 1/2*a*t² with s (displacement) in mm
-  // Rewriting yields v(s) = sqrt(2*a*s)
-  // Rewriting into steps and seperation in constant part and dynamic part:
-  // F_steps = sqrt((2000*a)/STEPS_PER_M_X) * 60 * sqrt(steps)
-  static uint32_t part = 0;
-  if(part == 0)
-    part = (uint32_t)sqrtf((2000.0f*3600.0f*ACCELERATION*16384.0f)/(float)STEPS_PER_M_X);
-  uint32_t res = int_sqrt((steps) << 14) * part;
-  return res >> 14;
-}
-
-/**
- * Determine the 'jerk' between 2 2D vectors and their speeds. The jerk can be
- * used to obtain an acceptable speed for changing directions between moves.
- * @param x1 x component of first vector
- * @param y1 y component of first vector
- * @param F1 feed rate of first move
- * @param x2 x component of second vector
- * @param y2 y component of second vector
- * @param F2 feed rate of second move
- */
-int dda_jerk_size_2d_real(int32_t x1, int32_t y1, uint32_t F1, int32_t x2, int32_t y2, uint32_t F2) {
-  const int maxlen = 16384;
-  // Normalize vectors so their length will be fixed
-  // Note: approx_distance is not precise enough and may result in violent direction changes
-  //sersendf_P(PSTR("Input vectors: (%ld, %ld) and (%ld, %ld)\r\n"),x1,y1,x2,y2);
-  int32_t len = int_sqrt(x1*x1+y1*y1);
-  x1 = (x1 * maxlen) / len;
-  y1 = (y1 * maxlen) / len;
-  len = int_sqrt(x2*x2+y2*y2);
-  x2 = (x2 * maxlen) / len;
-  y2 = (y2 * maxlen) / len;
-
-  //sersendf_P(PSTR("Normalized vectors: (%ld, %ld) and (%ld, %ld)\r\n"),x1,y1,x2,y2);
-
-  // Now scale the normalized vectors by their speeds
-  x1 *= F1; y1 *= F1; x2 *= F2; y2 *= F2;
-
-  //sersendf_P(PSTR("Speed vectors: (%ld, %ld) and (%ld, %ld)\r\n"),x1,y1,x2,y2);
-
-  // The difference between the vectors actually depicts the jerk
-  x1 -= x2; y1 -= y2;
-
-  //sersendf_P(PSTR("Jerk vector: (%ld, %ld)\r\n"),x1,y1);
-
-  return approx_distance(x1,y1) / maxlen;
-}
-
-/**
- * Determine the 'jerk' for 2 1D vectors and their speeds. The jerk can be used to obtain an
- * acceptable speed for changing directions between moves.
- * @param x component of 1d vector - used to determine if we go back or forward
- * @param F feed rate
- */
-int dda_jerk_size_1d(int32_t x1, uint32_t F1, int32_t x2, uint32_t F2) {
-  if(x1 > 0) x1 = F1;
-  else x1 = -F1;
-  if(x2 > 0) x2 = F2;
-  else x2 = -F2;
-
-  // The difference between the vectors actually depicts the jerk
-  x1 -= x2;
-  if(x1 < 0) x1 = -x1;  // Make sure it remains positive
-
-  //sersendf_P(PSTR("Jerk vector: (%ld, %ld)\r\n"),x1,y1);
-  return x1;
-}
-
-/**
- * Determine the 'jerk' between 2 vectors and their speeds. The jerk can be used to obtain an
- * acceptable speed for changing directions between moves.
- * Instead of using 2 axis at once, consider the jerk for each axis individually and take the
- * upper limit between both. This ensures that each axis does not changes speed too fast.
- * @param x1 x component of first vector
- * @param y1 y component of first vector
- * @param F1 feed rate of first move
- * @param x2 x component of second vector
- * @param y2 y component of second vector
- * @param F2 feed rate of second move
- */
-int dda_jerk_size_2d(int32_t x1, int32_t y1, uint32_t F1, int32_t x2, int32_t y2, uint32_t F2) {
-  return MAX(dda_jerk_size_1d(x1,F1,x2,F2),dda_jerk_size_1d(y1,F1,y2,F2));
-}
-
-/**
- * Safety procedure: if something goes wrong, for example an opto is triggered during normal movement,
- * we shut down the entire machine.
- * @param msg The reason why the machine did an emergency stop
- */
-void dda_emergency_shutdown(PGM_P msg_P) {
-  // Todo: is it smart to enable all interrupts again? e.g. can we create concurrent executions?
-  sei();  // Enable interrupts to print the message
-  serial_writestr_P(PSTR("error: emergency stop:"));
-  if (msg_P != NULL) serial_writestr_P(msg_P);
-  serial_writestr_P(PSTR("\r\n"));
-  delay_ms(20);   // Delay so the buffer can be flushed - otherwise the message is never sent
-  timer_stop();
-  queue_flush();
-  power_off();
-  cli();
-  for (;;) { }
-}
-
 /**
  * \brief Find maximum corner speed between two moves.
  * \details Find out how fast we can move around around a corner without
  * exceeding the expected jerk. Worst case this speed is zero, which means a
  * full stop between both moves. Best case it's the lower of the maximum speeds.
  *
- * This function is expected to be called from within dda_start().
+ * This function is expected to be called from within dda_create().
  *
  * \param [in] prev is the DDA structure of the move previous to the current one.
  * \param [in] current is the DDA structure of the move currently created.
@@ -344,7 +221,8 @@ void dda_join_moves(DDA *prev, DDA *current) {
     crossF_in_steps = ACCELERATE_RAMP_LEN(crossF);
 
     // Show the proposed crossing speed - this might get adjusted below
-    serprintf(PSTR("Initial crossing speed: %lu\r\n"), crossF_in_steps);
+    if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
+      sersendf_P(PSTR("Initial crossing speed: %lu\n"), crossF_in_steps);
 
     // Compute the maximum speed we can reach for crossing.
     crossF_in_steps = MIN(crossF_in_steps, this_total_steps);
@@ -404,14 +282,18 @@ void dda_join_moves(DDA *prev, DDA *current) {
     this_rampdown = this_total_steps - this_rampdown;
     this_F_start_in_steps = crossF_in_steps;
 
-    serprintf(PSTR("prev_F_start: %lu\r\n"), prev_F_start_in_steps);
-    serprintf(PSTR("prev_F: %lu\r\n"), prev_F_in_steps);
-    serprintf(PSTR("prev_rampup: %lu\r\n"), prev_rampup);
-    serprintf(PSTR("prev_rampdown: %lu\r\n"), prev_total_steps - prev_rampdown);
-    serprintf(PSTR("crossF: %lu\r\n"), crossF_in_steps);
-    serprintf(PSTR("this_rampup: %lu\r\n"), this_rampup);
-    serprintf(PSTR("this_rampdown: %lu\r\n"), this_total_steps - this_rampdown);
-    serprintf(PSTR("this_F: %lu\r\n"), this_F_in_steps);
+    if (DEBUG_DDA && (debug_flags & DEBUG_DDA)) {
+      sersendf_P(PSTR("prev_F_start: %lu\n"), prev_F_start_in_steps);
+      sersendf_P(PSTR("prev_F: %lu\n"), prev_F_in_steps);
+      sersendf_P(PSTR("prev_rampup: %lu\n"), prev_rampup);
+      sersendf_P(PSTR("prev_rampdown: %lu\n"),
+                 prev_total_steps - prev_rampdown);
+      sersendf_P(PSTR("crossF: %lu\n"), crossF_in_steps);
+      sersendf_P(PSTR("this_rampup: %lu\n"), this_rampup);
+      sersendf_P(PSTR("this_rampdown: %lu\n"),
+                 this_total_steps - this_rampdown);
+      sersendf_P(PSTR("this_F: %lu\n"), this_F_in_steps);
+    }
 
     uint8_t timeout = 0;
 
@@ -437,7 +319,7 @@ void dda_join_moves(DDA *prev, DDA *current) {
 
     // If we were not fast enough, any feedback will happen outside the atomic block:
     if(timeout) {
-      sersendf_P(PSTR("Error: look ahead not fast enough\r\n"));
+      sersendf_P(PSTR("// Notice: look ahead not fast enough\n"));
       lookahead_timeout++;
     }
   }

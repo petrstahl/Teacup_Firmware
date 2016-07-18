@@ -5,18 +5,15 @@
 */
 
 #include	<string.h>
-#ifndef SIMULATOR
-#include	<avr/interrupt.h>
-#endif
 
 #include	"gcode_parse.h"
 
+#include "cpu.h"
 #include	"dda.h"
 #include	"dda_queue.h"
 #include	"watchdog.h"
 #include	"delay.h"
 #include	"serial.h"
-#include	"sermsg.h"
 #include	"temp.h"
 #include	"heater.h"
 #include	"timer.h"
@@ -26,13 +23,14 @@
 #include	"clock.h"
 #include	"config_wrapper.h"
 #include	"home.h"
+#include "sd.h"
+
 
 /// the current tool
 uint8_t tool;
 
 /// the tool to be changed when we get an M6
 uint8_t next_tool;
-
 
 /************************************************************************//**
 
@@ -63,30 +61,29 @@ void process_gcode_command() {
 
 	// implement axis limits
 	#ifdef	X_MIN
-    if (next_target.target.axis[X] < X_MIN * 1000.)
-      next_target.target.axis[X] = X_MIN * 1000.;
+    if (next_target.target.axis[X] < (int32_t)(X_MIN * 1000.))
+      next_target.target.axis[X] = (int32_t)(X_MIN * 1000.);
 	#endif
 	#ifdef	X_MAX
-    if (next_target.target.axis[X] > X_MAX * 1000.)
-      next_target.target.axis[X] = X_MAX * 1000.;
+    if (next_target.target.axis[X] > (int32_t)(X_MAX * 1000.))
+      next_target.target.axis[X] = (int32_t)(X_MAX * 1000.);
 	#endif
 	#ifdef	Y_MIN
-    if (next_target.target.axis[Y] < Y_MIN * 1000.)
-      next_target.target.axis[Y] = Y_MIN * 1000.;
+    if (next_target.target.axis[Y] < (int32_t)(Y_MIN * 1000.))
+      next_target.target.axis[Y] = (int32_t)(Y_MIN * 1000.);
 	#endif
 	#ifdef	Y_MAX
-    if (next_target.target.axis[Y] > Y_MAX * 1000.)
-      next_target.target.axis[Y] = Y_MAX * 1000.;
+    if (next_target.target.axis[Y] > (int32_t)(Y_MAX * 1000.))
+      next_target.target.axis[Y] = (int32_t)(Y_MAX * 1000.);
 	#endif
 	#ifdef	Z_MIN
-    if (next_target.target.axis[Z] < Z_MIN * 1000.)
-      next_target.target.axis[Z] = Z_MIN * 1000.;
+    if (next_target.target.axis[Z] < (int32_t)(Z_MIN * 1000.))
+      next_target.target.axis[Z] = (int32_t)(Z_MIN * 1000.);
 	#endif
 	#ifdef	Z_MAX
-    if (next_target.target.axis[Z] > Z_MAX * 1000.)
-      next_target.target.axis[Z] = Z_MAX * 1000.;
+    if (next_target.target.axis[Z] > (int32_t)(Z_MAX * 1000.))
+      next_target.target.axis[Z] = (int32_t)(Z_MAX * 1000.);
 	#endif
-
 
 	// The GCode documentation was taken from http://reprap.org/wiki/Gcode .
 
@@ -102,6 +99,7 @@ void process_gcode_command() {
 
 	if (next_target.seen_G) {
 		uint8_t axisSelected = 0;
+
 		switch (next_target.G) {
 			case 0:
 				//? G0: Rapid Linear Motion
@@ -181,16 +179,18 @@ void process_gcode_command() {
 				//?
 				//? Example: G28
 				//?
-        //? This causes the RepRap machine to search for its X, Y and Z zero
+        //? This causes the RepRap machine to search for its X, Y and Z
         //? endstops. It does so at high speed, so as to get there fast. When
         //? it arrives it backs off slowly until the endstop is released again.
         //? Backing off slowly ensures more accurate positioning.
 				//?
-				//? If you add coordinates, then just the axes with coordinates specified will be zeroed.  Thus
+        //? If you add axis characters, then just the axes specified will be
+        //? seached. Thus
 				//?
-				//? G28 X0 Y72.3
+        //?   G28 X Y72.3
 				//?
-				//? will zero the X and Y axes, but not Z.  The actual coordinate values are ignored.
+        //? will zero the X and Y axes, but not Z. Coordinate values are
+        //? ignored.
 				//?
 
 				queue_wait();
@@ -333,8 +333,7 @@ void process_gcode_command() {
 
 				// unknown gcode: spit an error
 			default:
-				sersendf_P(PSTR("E: Bad G-code %d"), next_target.G);
-				// newline is sent from gcode_parse after we return
+				sersendf_P(PSTR("E: Bad G-code %d\n"), next_target.G);
 				return;
 		}
 	}
@@ -372,6 +371,55 @@ void process_gcode_command() {
 				//? Undocumented.
 				tool = next_tool;
 				break;
+
+      #ifdef SD
+      case 20:
+        //? --- M20: list SD card. ---
+        sd_list("/");
+        break;
+
+      case 21:
+        //? --- M21: initialise SD card. ---
+        //?
+        //? Has to be done before doing any other operation, including M20.
+        sd_mount();
+        break;
+
+      case 22:
+        //? --- M22: release SD card. ---
+        //?
+        //? Not mandatory. Just removing the card is fine, but results in
+        //? odd behaviour when trying to read from the card anyways. M22
+        //? makes also sure SD card printing is disabled, even with the card
+        //? inserted.
+        sd_unmount();
+        break;
+
+      case 23:
+        //? --- M23: select file. ---
+        //?
+        //? This opens a file for reading. This file is valid up to M22 or up
+        //? to the next M23.
+        sd_open(gcode_str_buf);
+        break;
+
+      case 24:
+        //? --- M24: start/resume SD print. ---
+        //?
+        //? This makes the SD card available as a G-code source. File is the
+        //? one selected with M23.
+        gcode_sources |= GCODE_SOURCE_SD;
+        break;
+
+      case 25:
+        //? --- M25: pause SD print. ---
+        //?
+        //? This removes the SD card from the bitfield of available G-code
+        //? sources. The file is kept open. The position inside the file
+        //? is kept as well, to allow resuming.
+        gcode_sources &= ! GCODE_SOURCE_SD;
+        break;
+      #endif /* SD */
 
 			case 82:
 				//? --- M82 - Set E codes absolute ---
@@ -439,11 +487,12 @@ void process_gcode_command() {
         //?
 				if ( ! next_target.seen_S)
 					break;
-        #ifdef HEATER_EXTRUDER
-          if ( ! next_target.seen_P)
+        if ( ! next_target.seen_P)
+          #ifdef HEATER_EXTRUDER
             next_target.P = HEATER_EXTRUDER;
-        // else use the first available device
-        #endif
+          #else
+            next_target.P = 0;
+          #endif
 				temp_set(next_target.P, next_target.S);
 				break;
 
@@ -485,11 +534,12 @@ void process_gcode_command() {
 					// wait for all moves to complete
 					queue_wait();
 				#endif
-        #ifdef HEATER_FAN
-          if ( ! next_target.seen_P)
+        if ( ! next_target.seen_P)
+          #ifdef HEATER_FAN
             next_target.P = HEATER_FAN;
-        // else use the first available device
-        #endif
+          #else
+            next_target.P = 0;
+          #endif
 				if ( ! next_target.seen_S)
 					break;
         heater_set(next_target.P, next_target.S);
@@ -505,7 +555,7 @@ void process_gcode_command() {
 				//?
 				break;
 
-			#ifdef	DEBUG
+      #ifdef DEBUG
 			case 111:
 				//? --- M111: Set Debug Level ---
 				//?
@@ -525,7 +575,7 @@ void process_gcode_command() {
 					break;
 				debug_flags = next_target.S;
 				break;
-			#endif
+      #endif /* DEBUG */
 
       case 112:
         //? --- M112: Emergency Stop ---
@@ -561,28 +611,27 @@ void process_gcode_command() {
 					queue_wait();
 				#endif
 				update_current_position();
-				sersendf_P(PSTR("X:%lq,Y:%lq,Z:%lq,E:%lq,F:%lu"),
+				sersendf_P(PSTR("X:%lq,Y:%lq,Z:%lq,E:%lq,F:%lu\n"),
                         current_position.axis[X], current_position.axis[Y],
                         current_position.axis[Z], current_position.axis[E],
 				                current_position.F);
 
-				#ifdef	DEBUG
-					if (DEBUG_POSITION && (debug_flags & DEBUG_POSITION)) {
-						sersendf_P(PSTR(",c:%lu}\nEndpoint: X:%ld,Y:%ld,Z:%ld,E:%ld,F:%lu,c:%lu}"),
-                            movebuffer[mb_tail].c, movebuffer[mb_tail].endpoint.axis[X],
-                            movebuffer[mb_tail].endpoint.axis[Y], movebuffer[mb_tail].endpoint.axis[Z],
-                            movebuffer[mb_tail].endpoint.axis[E], movebuffer[mb_tail].endpoint.F,
-						#ifdef ACCELERATION_REPRAP
-							movebuffer[mb_tail].end_c
-						#else
-							movebuffer[mb_tail].c
-						#endif
-						);
-						print_queue();
-					}
-				#endif /* DEBUG */
+        if (DEBUG_POSITION && (debug_flags & DEBUG_POSITION)) {
+          sersendf_P(PSTR("Endpoint: X:%ld,Y:%ld,Z:%ld,E:%ld,F:%lu,c:%lu}\n"),
+                     movebuffer[mb_tail].endpoint.axis[X],
+                     movebuffer[mb_tail].endpoint.axis[Y],
+                     movebuffer[mb_tail].endpoint.axis[Z],
+                     movebuffer[mb_tail].endpoint.axis[E],
+                     movebuffer[mb_tail].endpoint.F,
+                     #ifdef ACCELERATION_REPRAP
+                       movebuffer[mb_tail].end_c
+                     #else
+                       movebuffer[mb_tail].c
+                     #endif
+          );
+          print_queue();
+        }
 
-				// newline is sent from gcode_parse after we return
 				break;
 
 			case 115:
@@ -597,8 +646,7 @@ void process_gcode_command() {
 				//?  FIRMWARE_NAME:Teacup FIRMWARE_URL:http://github.com/traumflug/Teacup_Firmware/ PROTOCOL_VERSION:1.0 MACHINE_TYPE:Mendel EXTRUDER_COUNT:1 TEMP_SENSOR_COUNT:1 HEATER_COUNT:1
 				//?
 
-				sersendf_P(PSTR("FIRMWARE_NAME:Teacup FIRMWARE_URL:http://github.com/traumflug/Teacup_Firmware/ PROTOCOL_VERSION:1.0 MACHINE_TYPE:Mendel EXTRUDER_COUNT:%d TEMP_SENSOR_COUNT:%d HEATER_COUNT:%d"), 1, NUM_TEMP_SENSORS, NUM_HEATERS);
-				// newline is sent from gcode_parse after we return
+				sersendf_P(PSTR("FIRMWARE_NAME:Teacup FIRMWARE_URL:http://github.com/traumflug/Teacup_Firmware/ PROTOCOL_VERSION:1.0 MACHINE_TYPE:Mendel EXTRUDER_COUNT:%d TEMP_SENSOR_COUNT:%d HEATER_COUNT:%d\n"), 1, NUM_TEMP_SENSORS, NUM_HEATERS);
 				break;
 
 			case 116:
@@ -619,40 +667,42 @@ void process_gcode_command() {
         endstops_on();
         delay_ms(10); // allow the signal to stabilize
         {
-          const char* const open = PSTR("open ");
-          const char* const triggered = PSTR("triggered ");
-
-          #if defined(X_MIN_PIN)
-            sersendf_P(PSTR("x_min:"));
-            x_min() ? sersendf_P(triggered) : sersendf_P(open);
-          #endif
-          #if defined(X_MAX_PIN)
-            sersendf_P(PSTR("x_max:"));
-            x_max() ? sersendf_P(triggered) : sersendf_P(open);
-          #endif
-          #if defined(Y_MIN_PIN)
-            sersendf_P(PSTR("y_min:"));
-            y_min() ? sersendf_P(triggered) : sersendf_P(open);
-          #endif
-          #if defined(Y_MAX_PIN)
-            sersendf_P(PSTR("y_max:"));
-            y_max() ? sersendf_P(triggered) : sersendf_P(open);
-          #endif
-          #if defined(Z_MIN_PIN)
-            sersendf_P(PSTR("z_min:"));
-            z_min() ? sersendf_P(triggered) : sersendf_P(open);
-          #endif
-          #if defined(Z_MAX_PIN)
-            sersendf_P(PSTR("z_max:"));
-            z_max() ? sersendf_P(triggered) : sersendf_P(open);
-          #endif
           #if ! (defined(X_MIN_PIN) || defined(X_MAX_PIN) || \
                  defined(Y_MIN_PIN) || defined(Y_MAX_PIN) || \
                  defined(Z_MIN_PIN) || defined(Z_MAX_PIN))
-            sersendf_P(PSTR("no endstops defined"));
+            serial_writestr_P(PSTR("No endstops defined."));
+          #else
+            const char* const open = PSTR("open ");
+            const char* const triggered = PSTR("triggered ");
+          #endif
+
+          #if defined(X_MIN_PIN)
+            serial_writestr_P(PSTR("x_min:"));
+            x_min() ? serial_writestr_P(triggered) : serial_writestr_P(open);
+          #endif
+          #if defined(X_MAX_PIN)
+            serial_writestr_P(PSTR("x_max:"));
+            x_max() ? serial_writestr_P(triggered) : serial_writestr_P(open);
+          #endif
+          #if defined(Y_MIN_PIN)
+            serial_writestr_P(PSTR("y_min:"));
+            y_min() ? serial_writestr_P(triggered) : serial_writestr_P(open);
+          #endif
+          #if defined(Y_MAX_PIN)
+            serial_writestr_P(PSTR("y_max:"));
+            y_max() ? serial_writestr_P(triggered) : serial_writestr_P(open);
+          #endif
+          #if defined(Z_MIN_PIN)
+            serial_writestr_P(PSTR("z_min:"));
+            z_min() ? serial_writestr_P(triggered) : serial_writestr_P(open);
+          #endif
+          #if defined(Z_MAX_PIN)
+            serial_writestr_P(PSTR("z_max:"));
+            z_max() ? serial_writestr_P(triggered) : serial_writestr_P(open);
           #endif
         }
         endstops_off();
+        serial_writechar('\n');
         break;
 
       #ifdef EECONFIG
@@ -660,11 +710,12 @@ void process_gcode_command() {
 				//? --- M130: heater P factor ---
 				//? Undocumented.
 			  	//  P factor in counts per degreeC of error
-        #ifdef HEATER_EXTRUDER
-          if ( ! next_target.seen_P)
+        if ( ! next_target.seen_P)
+          #ifdef HEATER_EXTRUDER
             next_target.P = HEATER_EXTRUDER;
-        // else use the first available device
-        #endif
+          #else
+            next_target.P = 0;
+          #endif
 				if (next_target.seen_S)
 					pid_set_p(next_target.P, next_target.S);
 				break;
@@ -673,10 +724,12 @@ void process_gcode_command() {
 				//? --- M131: heater I factor ---
 				//? Undocumented.
 			  	// I factor in counts per C*s of integrated error
-        #ifdef HEATER_EXTRUDER
-          if ( ! next_target.seen_P)
+        if ( ! next_target.seen_P)
+          #ifdef HEATER_EXTRUDER
             next_target.P = HEATER_EXTRUDER;
-        #endif
+          #else
+            next_target.P = 0;
+          #endif
 				if (next_target.seen_S)
 					pid_set_i(next_target.P, next_target.S);
 				break;
@@ -685,10 +738,12 @@ void process_gcode_command() {
 				//? --- M132: heater D factor ---
 				//? Undocumented.
 			  	// D factor in counts per degreesC/second
-        #ifdef HEATER_EXTRUDER
-          if ( ! next_target.seen_P)
+        if ( ! next_target.seen_P)
+          #ifdef HEATER_EXTRUDER
             next_target.P = HEATER_EXTRUDER;
-        #endif
+          #else
+            next_target.P = 0;
+          #endif
 				if (next_target.seen_S)
 					pid_set_d(next_target.P, next_target.S);
 				break;
@@ -696,10 +751,12 @@ void process_gcode_command() {
 			case 133:
 				//? --- M133: heater I limit ---
 				//? Undocumented.
-        #ifdef HEATER_EXTRUDER
-          if ( ! next_target.seen_P)
+        if ( ! next_target.seen_P)
+          #ifdef HEATER_EXTRUDER
             next_target.P = HEATER_EXTRUDER;
-        #endif
+          #else
+            next_target.P = 0;
+          #endif
 				if (next_target.seen_S)
 					pid_set_i_limit(next_target.P, next_target.S);
 				break;
@@ -711,18 +768,20 @@ void process_gcode_command() {
 				break;
       #endif /* EECONFIG */
 
-			#ifdef	DEBUG
+      #ifdef DEBUG
 			case 136:
 				//? --- M136: PRINT PID settings to host ---
 				//? Undocumented.
 				//? This comand is only available in DEBUG builds.
-        #ifdef HEATER_EXTRUDER
-				if ( ! next_target.seen_P)
-					next_target.P = HEATER_EXTRUDER;
+        if ( ! next_target.seen_P)
+          #ifdef HEATER_EXTRUDER
+            next_target.P = HEATER_EXTRUDER;
+          #else
+            next_target.P = 0;
+          #endif
 				heater_print(next_target.P);
-        #endif
 				break;
-			#endif
+      #endif /* DEBUG */
 
 			case 140:
 				//? --- M140: Set heated bed temperature ---
@@ -734,14 +793,13 @@ void process_gcode_command() {
 				#endif
 				break;
 
-			#ifdef	DEBUG
+      #ifdef DEBUG
 			case 240:
 				//? --- M240: echo off ---
 				//? Disable echo.
 				//? This command is only available in DEBUG builds.
 				debug_flags &= ~DEBUG_ECHO;
-				serial_writestr_P(PSTR("Echo off"));
-				// newline is sent from gcode_parse after we return
+				serial_writestr_P(PSTR("Echo off\n"));
 				break;
 
 			case 241:
@@ -749,16 +807,13 @@ void process_gcode_command() {
 				//? Enable echo.
 				//? This command is only available in DEBUG builds.
 				debug_flags |= DEBUG_ECHO;
-				serial_writestr_P(PSTR("Echo on"));
-				// newline is sent from gcode_parse after we return
+				serial_writestr_P(PSTR("Echo on\n"));
 				break;
-
-			#endif /* DEBUG */
+      #endif /* DEBUG */
 
 				// unknown mcode: spit an error
 			default:
-				sersendf_P(PSTR("E: Bad M-code %d"), next_target.M);
-				// newline is sent from gcode_parse after we return
+				sersendf_P(PSTR("E: Bad M-code %d\n"), next_target.M);
 		} // switch (next_target.M)
 	} // else if (next_target.seen_M)
 } // process_gcode_command()

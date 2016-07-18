@@ -7,17 +7,14 @@
 #include	<string.h>
 #include	<stdlib.h>
 #include	<math.h>
-#ifndef SIMULATOR
-#include	<avr/interrupt.h>
-#endif
 
 #include	"dda_maths.h"
 #include "preprocessor_math.h"
 #include "dda_kinematics.h"
 #include	"dda_lookahead.h"
+#include "cpu.h"
 #include	"timer.h"
 #include	"serial.h"
-#include	"sermsg.h"
 #include	"gcode_parse.h"
 #include	"dda_queue.h"
 #include	"debug.h"
@@ -74,10 +71,10 @@ static const axes_uint32_t PROGMEM maximum_feedrate_P = {
 /// \brief Initialization constant for the ramping algorithm. Timer cycles for
 ///        first step interval.
 static const axes_uint32_t PROGMEM c0_P = {
-  (uint32_t)((double)F_CPU / SQRT((double)(STEPS_PER_M_X * ACCELERATION / 2000.))),
-  (uint32_t)((double)F_CPU / SQRT((double)(STEPS_PER_M_Y * ACCELERATION / 2000.))),
-  (uint32_t)((double)F_CPU / SQRT((double)(STEPS_PER_M_Z * ACCELERATION / 2000.))),
-  (uint32_t)((double)F_CPU / SQRT((double)(STEPS_PER_M_E * ACCELERATION / 2000.)))
+  (uint32_t)((double)F_CPU / SQRT((double)STEPS_PER_M_X * ACCELERATION / 2000.)),
+  (uint32_t)((double)F_CPU / SQRT((double)STEPS_PER_M_Y * ACCELERATION / 2000.)),
+  (uint32_t)((double)F_CPU / SQRT((double)STEPS_PER_M_Z * ACCELERATION / 2000.)),
+  (uint32_t)((double)F_CPU / SQRT((double)STEPS_PER_M_E * ACCELERATION / 2000.))
 };
 
 /*! Set the direction of the 'n' axis
@@ -120,10 +117,7 @@ void dda_init(void) {
 	This is needed for example after homing or a G92. The new location must be in startpoint already.
 */
 void dda_new_startpoint(void) {
-  enum axis_e i;
-
-  for (i = X; i < AXIS_COUNT; i++)
-    startpoint_steps.axis[i] = um_to_steps(startpoint.axis[i], i);
+	axes_um_to_steps(startpoint.axis, startpoint_steps.axis);
 }
 
 /*! CREATE a dda given current_position and a target, save to passed location so we can write directly into the queue
@@ -221,9 +215,6 @@ void dda_create(DDA *dda, TARGET *target) {
   if ( ! target->e_relative) {
     int32_t delta_steps;
 
-    delta_um[E] = (uint32_t)labs(target->axis[E] - startpoint.axis[E]);
-    steps[E] = um_to_steps(target->axis[E], E);
-
     delta_steps = steps[E] - startpoint_steps.axis[E];
     dda->delta[E] = (uint32_t)labs(delta_steps);
     startpoint_steps.axis[E] = steps[E];
@@ -243,7 +234,7 @@ void dda_create(DDA *dda, TARGET *target) {
     // When we get more extruder axes:
     // for (i = E; i < AXIS_COUNT; i++) { ...
     delta_um[E] = (uint32_t)labs(target->axis[E]);
-    dda->delta[E] = (uint32_t)labs(um_to_steps(target->axis[E], E));
+    dda->delta[E] = (uint32_t)labs(steps[E]);
     #ifdef LOOKAHEAD
       dda->delta_um[E] = target->axis[E];
     #endif
@@ -281,7 +272,10 @@ void dda_create(DDA *dda, TARGET *target) {
 		stepper_enable();
 		x_enable();
 		y_enable();
-		// Z is enabled in dda_start()
+    #ifndef Z_AUTODISABLE
+      z_enable();
+    // #else Z is enabled in dda_start().
+    #endif
 		e_enable();
 
 		// since it's unusual to combine X, Y and Z changes in a single move on reprap, check if we can use simpler approximations before trying the full 3d approximation.
@@ -322,7 +316,7 @@ void dda_create(DDA *dda, TARGET *target) {
 			// 2^32/6000 is about 715mm which should be plenty
 
 			// changed * 10 to * (F_CPU / 100000) so we can work in cpu_ticks rather than microseconds.
-			// timer.c setTimer() routine altered for same reason
+			// timer.c timer_set() routine altered for same reason
 
 			// changed distance * 6000 .. * F_CPU / 100000 to
 			//         distance * 2400 .. * F_CPU / 40000 so we can move a distance of up to 1800mm without overflowing
@@ -494,8 +488,10 @@ void dda_start(DDA *dda) {
 	if ( ! dda->nullmove) {
 		// get ready to go
 		psu_timeout = 0;
-    if (dda->delta[Z])
-			z_enable();
+    #ifdef Z_AUTODISABLE
+      if (dda->delta[Z])
+        z_enable();
+    #endif
 		if (dda->endstop_check)
 			endstops_on();
 
@@ -527,7 +523,7 @@ void dda_start(DDA *dda) {
 		dda->live = 1;
 
 		// set timeout for first step
-    setTimer(dda->c);
+    timer_set(dda->c, 0);
 	}
 	// else just a speed change, keep dda->live = 0
 
@@ -565,16 +561,6 @@ void dda_step(DDA *dda) {
       move_state.counter[X] += dda->total_steps;
 		}
 	}
-#else	// ACCELERATION_TEMPORAL
-	if (dda->axis_to_step == X) {
-		x_step();
-    move_state.steps[X]--;
-    move_state.time[X] += dda->step_interval[X];
-    move_state.all_time = move_state.time[X];
-	}
-#endif
-
-#if ! defined ACCELERATION_TEMPORAL
   if (move_state.steps[Y]) {
     move_state.counter[Y] -= dda->delta[Y];
     if (move_state.counter[Y] < 0) {
@@ -583,16 +569,6 @@ void dda_step(DDA *dda) {
       move_state.counter[Y] += dda->total_steps;
 		}
 	}
-#else	// ACCELERATION_TEMPORAL
-	if (dda->axis_to_step == Y) {
-		y_step();
-    move_state.steps[Y]--;
-    move_state.time[Y] += dda->step_interval[Y];
-    move_state.all_time = move_state.time[Y];
-	}
-#endif
-
-#if ! defined ACCELERATION_TEMPORAL
   if (move_state.steps[Z]) {
     move_state.counter[Z] -= dda->delta[Z];
     if (move_state.counter[Z] < 0) {
@@ -601,16 +577,6 @@ void dda_step(DDA *dda) {
       move_state.counter[Z] += dda->total_steps;
 		}
 	}
-#else	// ACCELERATION_TEMPORAL
-	if (dda->axis_to_step == Z) {
-		z_step();
-    move_state.steps[Z]--;
-    move_state.time[Z] += dda->step_interval[Z];
-    move_state.all_time = move_state.time[Z];
-	}
-#endif
-
-#if ! defined ACCELERATION_TEMPORAL
   if (move_state.steps[E]) {
     move_state.counter[E] -= dda->delta[E];
     if (move_state.counter[E] < 0) {
@@ -619,23 +585,7 @@ void dda_step(DDA *dda) {
       move_state.counter[E] += dda->total_steps;
 		}
 	}
-#else	// ACCELERATION_TEMPORAL
-	if (dda->axis_to_step == E) {
-		e_step();
-    move_state.steps[E]--;
-    move_state.time[E] += dda->step_interval[E];
-    move_state.all_time = move_state.time[E];
-	}
 #endif
-
-	#if STEP_INTERRUPT_INTERRUPTIBLE && ! defined ACCELERATION_RAMPING
-		// Since we have sent steps to all the motors that will be stepping
-		// and the rest of this function isn't so time critical, this interrupt
-		// can now be interruptible by other interrupts.
-		// The step interrupt is disabled before entering dda_step() to ensure
-		// that we don't step again while computing the below.
-		sei();
-	#endif
 
 	#ifdef ACCELERATION_REPRAP
 		// linear acceleration magic, courtesy of http://www.embedded.com/design/mcus-processors-and-socs/4006438/Generate-stepper-motor-speed-profiles-in-real-time
@@ -689,22 +639,64 @@ void dda_step(DDA *dda) {
       timer shall do the step as soon as possible and compensate for the delay
       later. In turn we promise here to send a maximum of four such
       short-delays consecutively and to give sufficient time on average.
-   */
-		uint32_t c_candidate;
+    */
+    // This is the time which led to this call of dda_step().
+    move_state.last_time = move_state.time[dda->axis_to_step] +
+                           dda->step_interval[dda->axis_to_step];
 
-		dda->c = 0xFFFFFFFF;
-    for (i = X; i < AXIS_COUNT; i++) {
-      if (move_state.steps[i]) {
-        c_candidate = move_state.time[i] + dda->step_interval[i] - move_state.last_time;
-        if (c_candidate < dda->c) {
-          dda->axis_to_step = i;
-          dda->c = c_candidate;
+    do {
+      uint32_t c_candidate;
+      enum axis_e i;
+
+      if (dda->axis_to_step == X) {
+        x_step();
+        move_state.steps[X]--;
+        move_state.time[X] += dda->step_interval[X];
+      }
+      if (dda->axis_to_step == Y) {
+        y_step();
+        move_state.steps[Y]--;
+        move_state.time[Y] += dda->step_interval[Y];
+      }
+      if (dda->axis_to_step == Z) {
+        z_step();
+        move_state.steps[Z]--;
+        move_state.time[Z] += dda->step_interval[Z];
+      }
+      if (dda->axis_to_step == E) {
+        e_step();
+        move_state.steps[E]--;
+        move_state.time[E] += dda->step_interval[E];
+      }
+      unstep();
+
+      // Find the next stepper to step.
+      dda->c = 0xFFFFFFFF;
+      for (i = X; i < AXIS_COUNT; i++) {
+        if (move_state.steps[i]) {
+          c_candidate = move_state.time[i] + dda->step_interval[i] -
+                        move_state.last_time;
+          if (c_candidate < dda->c) {
+            dda->axis_to_step = i;
+            dda->c = c_candidate;
+          }
         }
       }
-    }
-	#endif
+
+      // No stepper to step found? Then we're done.
+      if (dda->c == 0xFFFFFFFF) {
+        dda->live = 0;
+        dda->done = 1;
+        break;
+      }
+    } while (timer_set(dda->c, 1));
+
+  #endif /* ACCELERATION_TEMPORAL */
 
   // If there are no steps left or an endstop stop happened, we have finished.
+  //
+  // TODO: with ACCELERATION_TEMPORAL this duplicates some code. See where
+  //       dda->live is zero'd, about 10 lines above.
   if ((move_state.steps[X] == 0 && move_state.steps[Y] == 0 &&
        move_state.steps[Z] == 0 && move_state.steps[E] == 0)
     #ifdef ACCELERATION_RAMPING
@@ -721,15 +713,19 @@ void dda_step(DDA *dda) {
 		#ifdef	DC_EXTRUDER
 			heater_set(DC_EXTRUDER, 0);
 		#endif
-		// z stepper is only enabled while moving
-		z_disable();
+    #ifdef Z_AUTODISABLE
+      // Z stepper is only enabled while moving.
+      z_disable();
+    #endif
 
     // No need to restart timer here.
     // After having finished, dda_start() will do it.
 	}
   else {
 		psu_timeout = 0;
-    setTimer(dda->c);
+    #ifndef ACCELERATION_TEMPORAL
+      timer_set(dda->c, 0);
+    #endif
   }
 
 	// turn off step outputs, hopefully they've been on long enough by now to register with the drivers
@@ -753,13 +749,14 @@ void dda_step(DDA *dda) {
   accurate curves!
 */
 void dda_clock() {
-  static volatile uint8_t busy = 0;
   DDA *dda;
   static DDA *last_dda = NULL;
   uint8_t endstop_trigger = 0;
   #ifdef ACCELERATION_RAMPING
   uint32_t move_step_no, move_c;
+  int32_t move_n;
   uint8_t recalc_speed;
+  uint8_t current_id ;
   #endif
 
   dda = queue_current_movement();
@@ -772,13 +769,6 @@ void dda_clock() {
 
   if (dda == NULL)
     return;
-
-  // Lengthy calculations ahead!
-  // Make sure we didn't re-enter, then allow nested interrupts.
-  if (busy)
-    return;
-  busy = 1;
-  sei();
 
   // Caution: we mangle step counters here without locking interrupts. This
   //          means, we trust dda isn't changed behind our back, which could
@@ -872,6 +862,7 @@ void dda_clock() {
     // http://www.embedded.com/design/mcus-processors-and-socs/4006438/Generate-stepper-motor-speed-profiles-in-real-time
     // and http://www.atmel.com/images/doc8017.pdf (Atmel app note AVR446)
     ATOMIC_START
+      current_id = dda->id;
       move_step_no = move_state.step_no;
       // All other variables are read-only or unused in dda_step(),
       // so no need for atomic operations.
@@ -880,29 +871,29 @@ void dda_clock() {
     recalc_speed = 0;
     if (move_step_no < dda->rampup_steps) {
       #ifdef LOOKAHEAD
-        dda->n = dda->start_steps + move_step_no;
+        move_n = dda->start_steps + move_step_no;
       #else
-        dda->n = move_step_no;
+        move_n = move_step_no;
       #endif
       recalc_speed = 1;
     }
     else if (move_step_no >= dda->rampdown_steps) {
       #ifdef LOOKAHEAD
-        dda->n = dda->total_steps - move_step_no + dda->end_steps;
+        move_n = dda->total_steps - move_step_no + dda->end_steps;
       #else
-        dda->n = dda->total_steps - move_step_no;
+        move_n = dda->total_steps - move_step_no;
       #endif
       recalc_speed = 1;
     }
     if (recalc_speed) {
-      if (dda->n == 0)
+      if (move_n == 0)
         move_c = pgm_read_dword(&c0_P[dda->fast_axis]);
       else
         // Explicit formula: c0 * (sqrt(n + 1) - sqrt(n)),
         // approximation here: c0 * (1 / (2 * sqrt(n))).
         // This >> 13 looks odd, but is verified with the explicit formula.
         move_c = (pgm_read_dword(&c0_P[dda->fast_axis]) *
-                  int_inv_sqrt(dda->n)) >> 13;
+                  int_inv_sqrt(move_n)) >> 13;
 
       // TODO: most likely this whole check is obsolete. It was left as a
       //       safety margin, only. Rampup steps calculation should be accurate
@@ -923,13 +914,21 @@ void dda_clock() {
 
       // Write results.
       ATOMIC_START
-        dda->c = move_c;
+        /**
+          Apply new n & c values only if dda didn't change underneath us. It
+          is possible for dda to be modified since fetching values in the
+          ATOMIC above, e.g. when a new dda becomes live.
+
+          In case such a change happened, values in the new dda are more
+          recent than our calculation here, anyways.
+        */
+        if (current_id == dda->id) {
+          dda->c = move_c;
+          dda->n = move_n;
+        }
       ATOMIC_END
     }
   #endif
-
-  cli(); // Compensate sei() above.
-  busy = 0;
 }
 
 /// update global current_position struct

@@ -4,6 +4,7 @@
 	\brief Do stuff periodically
 */
 
+#include <stdint.h>
 #include	"pinio.h"
 #include	"sersendf.h"
 #include	"dda_queue.h"
@@ -12,24 +13,33 @@
 #include	"debug.h"
 #include	"heater.h"
 #include	"serial.h"
+#include "display.h"
 #ifdef	TEMP_INTERCOM
 	#include	"intercom.h"
 #endif
 #include	"memory_barrier.h"
 
+/**
+  If the specific bit is set, execute the following block exactly once
+  and then clear the flag.
+*/
+#define ifclock(F) for ( ; F; F = 0)
 
-/// Every time our clock fires we increment this,
-/// so we know when 10ms has elapsed.
-uint8_t clock_counter_10ms = 0;
-/// Keep track of when 250ms has elapsed.
-uint8_t clock_counter_250ms = 0;
-/// Keep track of when 1s has elapsed.
-uint8_t clock_counter_1s = 0;
 
-/// Flags to tell main loop when above have elapsed.
-volatile uint8_t clock_flag_10ms = 0;
-volatile uint8_t clock_flag_250ms = 0;
-volatile uint8_t clock_flag_1s = 0;
+/**
+  Every time our clock fires we increment this,
+  so we know when 10ms/250ms/1s has elapsed.
+*/
+static uint8_t clock_counter_10ms = 0;
+static uint8_t clock_counter_250ms = 0;
+static uint8_t clock_counter_1s = 0;
+
+/**
+  Flags to tell clock() when above have elapsed.
+*/
+static volatile uint8_t clock_flag_10ms = 0;
+static volatile uint8_t clock_flag_250ms = 0;
+static volatile uint8_t clock_flag_1s = 0;
 
 
 /** Advance our clock by a tick.
@@ -62,11 +72,12 @@ void clock_tick(void) {
 	called from clock_10ms(), do not call directly
 */
 static void clock_250ms(void) {
+
   if (heaters_all_zero()) {
 		if (psu_timeout > (30 * 4)) {
 			power_off();
-		}
-		else {
+    }
+    else {
       ATOMIC_START
         psu_timeout++;
       ATOMIC_END
@@ -74,13 +85,25 @@ static void clock_250ms(void) {
 	}
 
 	ifclock(clock_flag_1s) {
+    #ifdef DISPLAY
+      display_clock();
+    #endif
+
 		if (DEBUG_POSITION && (debug_flags & DEBUG_POSITION)) {
 			// current position
 			update_current_position();
-      sersendf_P(PSTR("Pos: %lq,%lq,%lq,%lq,%lu\n"), current_position.axis[X], current_position.axis[Y], current_position.axis[Z], current_position.axis[E], current_position.F);
+      sersendf_P(PSTR("Pos: %lq,%lq,%lq,%lq,%lu\n"),
+                 current_position.axis[X], current_position.axis[Y],
+                 current_position.axis[Z], current_position.axis[E],
+                 current_position.F);
 
 			// target position
-      sersendf_P(PSTR("Dst: %lq,%lq,%lq,%lq,%lu\n"), movebuffer[mb_tail].endpoint.axis[X], movebuffer[mb_tail].endpoint.axis[Y], movebuffer[mb_tail].endpoint.axis[Z], movebuffer[mb_tail].endpoint.axis[E], movebuffer[mb_tail].endpoint.F);
+      sersendf_P(PSTR("Dst: %lq,%lq,%lq,%lq,%lu\n"),
+                 movebuffer[mb_tail].endpoint.axis[X],
+                 movebuffer[mb_tail].endpoint.axis[Y],
+                 movebuffer[mb_tail].endpoint.axis[Z],
+                 movebuffer[mb_tail].endpoint.axis[E],
+                 movebuffer[mb_tail].endpoint.F);
 
 			// Queue
 			print_queue();
@@ -105,24 +128,30 @@ static void clock_10ms(void) {
 	// reset watchdog
 	wd_reset();
 
-	temp_tick();
+	temp_sensor_tick();
 
 	ifclock(clock_flag_250ms) {
 		clock_250ms();
 	}
 }
 
-/*! do reoccuring stuff
+/**
+  Do reoccuring stuff. Call it occasionally in busy loops.
 
-	call it occasionally in busy loops
+  Other than clock_tick() above, which is called at a constant interval, this
+  is called from the main loop. So it can be called very often on an idle
+  printer, but rather rarely on one running full speed.
 */
 void clock() {
 	ifclock(clock_flag_10ms) {
 		clock_10ms();
 	}
+
+  #ifdef DISPLAY
+    display_tick();
+  #endif
+
 #ifdef SIMULATOR
   sim_time_warp();
 #endif
 }
-
-

@@ -20,15 +20,34 @@ fi
 
 
 # General preparation.
+PIPE_IN_FILE=$(mktemp -u)
+PIPE_OUT_FILE=$(mktemp -u)
 TRACEIN_FILE=$(mktemp)
 STATISTICS_FILE=$(mktemp)
 
-trap 'cat '${STATISTICS_FILE}'; rm -f '${TRACEIN_FILE}' '${STATISTICS_FILE} 0
+trap 'cat '${STATISTICS_FILE}'; rm -f '${PIPE_IN_FILE}' '${PIPE_OUT_FILE}' \
+     '${TRACEIN_FILE}' '${STATISTICS_FILE} 0
 
+mkfifo ${PIPE_IN_FILE} || exit 1
+mkfifo ${PIPE_OUT_FILE} || exit 1
+
+
+# Respect USER_CONFIG.
+if [ "${USER_CONFIG}" ]; then
+  CONFIG="${USER_CONFIG}"
+  TEACUP_ELF="${USER_CONFIG%.h}/teacup.elf"
+  TEACUP_ELF="../build/${TEACUP_ELF#../}"
+else
+  CONFIG="../config.h"
+  TEACUP_ELF="../build/teacup.elf"
+fi
+echo "Taking configuration in ${CONFIG}."
+echo "Taking Teacup binary ${TEACUP_ELF}."
 
 # Prepare statistics.
 echo                             > ${STATISTICS_FILE}
-(cd .. && make size) | tail -4  >> ${STATISTICS_FILE}
+(cd .. && echo make USER_CONFIG="${USER_CONFIG}" size) | \
+  tail -4                       >> ${STATISTICS_FILE}
 
 
 # Prepare a pin tracing file, assuming a Gen7-v1.4 configuration. See
@@ -51,13 +70,13 @@ echo "# DEBUG LED"         >> ${TRACEIN_FILE}
 echo "+ PORTC.C5-Out"      >> ${TRACEIN_FILE}
 echo "Assuming pin configuration for a Gen7-v1.4 + debug LED on DIO21."
 
-STEPS_PER_M_X=$(grep STEPS_PER_M_X ../config.h | \
+STEPS_PER_M_X=$(grep STEPS_PER_M_X ${CONFIG} | \
                 grep -v ^// | awk '{ print $3; }')
 if [ "${STEPS_PER_M_X}"0 -eq 0 ]; then
   echo "STEPS_PER_M_X not found, assuming 80'000."
   STEPS_PER_M_X=80000
 fi
-STEPS_PER_M_Y=$(grep STEPS_PER_M_Y ../config.h | \
+STEPS_PER_M_Y=$(grep STEPS_PER_M_Y ${CONFIG} | \
                 grep -v ^// | awk '{ print $3; }')
 if [ "${STEPS_PER_M_Y}"0 -eq 0 ]; then
   echo "STEPS_PER_M_Y not found, assuming 80'000."
@@ -82,20 +101,36 @@ for GCODE_FILE in $*; do
   VEL_FILE="${FILE}.processed.vcd"
 
 
-  # We assume here queue and rx buffer are large enough to read
-  # the file in one chunk. If not, raise MOVEBUFFER_SIZE in config.h.
+  # Start the simulator and send the file line by line.
+  exec 3<>${PIPE_IN_FILE}
+  exec 4<>${PIPE_OUT_FILE}
+
   "${SIMULAVR}" -c vcd:${TRACEIN_FILE}:"${VCD_FILE}" \
-                -f ../build/teacup.elf \
-                -m 60000000000 -v < "${GCODE_FILE}" | \
-    while read -r LINE; do
-      echo "${LINE}"
-      case "${LINE}" in
-        stop)
-          echo "Got \"stop\", killing ${SIMULAVR}."
-          kill -INT $(pidof -x "${SIMULAVR}")
-          ;;
-      esac
-    done 
+                -f "${TEACUP_ELF}" \
+                -m 60000000000 -v <&3 >&4 2>&4 &
+
+  while read -rs -u 4 LINE; do
+    echo "${LINE}"
+    case "${LINE}" in
+      *"Ran too long"*)
+        echo ">> SimulAVR ended."
+        break
+        ;;
+      "ok"*)
+        read LINE
+        echo ">> Sending ${LINE}"
+        echo "${LINE}" >&3
+        ;;
+      "stop")
+        echo ">> Got \"stop\", killing SimulAVR."
+        killall -INT $(basename "${SIMULAVR}") 2> /dev/null || \
+          killall -INT "lt-"$(basename "${SIMULAVR}")
+        ;;
+    esac
+  done < "${GCODE_FILE}"
+
+  exec 3>&-
+  exec 4>&-
 
 
   # Make plottable files from VCD files.
@@ -262,9 +297,9 @@ EOF
         } else { # falling flange
           print time " b" bit " " ledID;
           if (ledOnTime != 0) {
-            ledTime = time - ledOnTime;
+            # Convert from nanoseconds to clock cycles.
+            ledTime = (time - ledOnTime) / 50;
             print ledOnTime " b" print_binary(ledTime, 32) " " ledTimeID;
-            ledTime /= 50; # Convert from nanoseconds to clock cycles.
             if (ledTimeMin == 0 || ledTime < ledTimeMin) {
               ledTimeMin = ledTime;
             }
@@ -317,7 +352,7 @@ EOF
       print "$upscope $end";
       print "$scope module Timings $end";
       print "$var wire 1 " ledID " Debug_LED $end";
-      print "$var integer " 32 " " ledTimeID " LED_on_time $end";
+      print "$var integer " 32 " " ledTimeID " LED_on_clocks $end";
       print "$upscope $end";
       print "$enddefinitions $end";
       print "#0";

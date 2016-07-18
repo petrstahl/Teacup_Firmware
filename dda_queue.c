@@ -5,18 +5,15 @@
 */
 
 #include	<string.h>
-#ifndef SIMULATOR
-#include	<avr/interrupt.h>
-#endif
 
 #include	"config_wrapper.h"
 #include	"timer.h"
 #include	"serial.h"
-#include	"sermsg.h"
 #include	"temp.h"
 #include	"delay.h"
 #include	"sersendf.h"
 #include	"clock.h"
+#include "cpu.h"
 #include	"memory_barrier.h"
 
 /// movebuffer head pointer. Points to the last move in the queue.
@@ -37,14 +34,13 @@ uint8_t	mb_tail = 0;
 /// The size does not need to be a power of 2 anymore!
 DDA BSS movebuffer[MOVEBUFFER_SIZE];
 
+/// Find the next DDA index after 'x', where 0 <= x < MOVEBUFFER_SIZE
+#define MB_NEXT(x) ((x) < MOVEBUFFER_SIZE - 1 ? (x) + 1 : 0)
+
 /// check if the queue is completely full
 uint8_t queue_full() {
 	MEMORY_BARRIER();
-	if (mb_tail > mb_head) {
-		return ((mb_tail - mb_head - 1) == 0) ? 255 : 0;
-	} else {
-		return ((mb_tail + MOVEBUFFER_SIZE - mb_head - 1) == 0) ? 255 : 0;
-	}
+  return MB_NEXT(mb_head) == mb_tail;
 }
 
 /// check if the queue is completely empty
@@ -52,7 +48,7 @@ uint8_t queue_empty() {
   uint8_t result;
 
   ATOMIC_START
-    result = ((mb_tail == mb_head) && (movebuffer[mb_tail].live == 0))?255:0;
+    result = (mb_tail == mb_head && movebuffer[mb_tail].live == 0);
   ATOMIC_END
 
 	return result;
@@ -82,15 +78,16 @@ void queue_step() {
 	DDA* current_movebuffer = &movebuffer[mb_tail];
 	if (current_movebuffer->live) {
 		if (current_movebuffer->waitfor_temp) {
-			setTimer(HEATER_WAIT_TIMEOUT);
+      timer_set(HEATER_WAIT_TIMEOUT, 0);
 			if (temp_achieved()) {
 				current_movebuffer->live = current_movebuffer->done = 0;
 				serial_writestr_P(PSTR("Temp achieved\n"));
 			}
+      else {
+        temp_print(TEMP_SENSOR_none);
+      }
 		}
 		else {
-			// NOTE: dda_step makes this interrupt interruptible for some time,
-			//       see STEP_INTERRUPT_INTERRUPTIBLE.
 			dda_step(current_movebuffer);
 		}
 	}
@@ -108,8 +105,7 @@ void enqueue_home(TARGET *t, uint8_t endstop_check, uint8_t endstop_stop_cond) {
 	while (queue_full())
 		delay_us(100);
 
-	uint8_t h = mb_head + 1;
-	h &= (MOVEBUFFER_SIZE - 1);
+  uint8_t h = MB_NEXT(mb_head);
 
 	DDA* new_movebuffer = &(movebuffer[h]);
 
@@ -140,45 +136,45 @@ void enqueue_home(TARGET *t, uint8_t endstop_check, uint8_t endstop_stop_cond) {
   ATOMIC_END
 
 	if (isdead) {
+    timer_reset();
 		next_move();
-		// Compensate for the cli() in setTimer().
+    // Compensate for the cli() in timer_set().
 		sei();
 	}
 }
 
 /// go to the next move.
 /// be aware that this is sometimes called from interrupt context, sometimes not.
-/// Note that if it is called from outside an interrupt it must not/can not by
+/// Note that if it is called from outside an interrupt it must not/can not
 /// be interrupted such that it can be re-entered from within an interrupt.
 /// The timer interrupt MUST be disabled on entry. This is ensured because
 /// the timer was disabled at the start of the ISR or else because the current
-/// move buffer was dead in the non-interrupt case (which indicates that the 
+/// move buffer was dead in the non-interrupt case (which indicates that the
 /// timer interrupt is disabled).
 void next_move() {
 	while ((queue_empty() == 0) && (movebuffer[mb_tail].live == 0)) {
 		// next item
-		uint8_t t = mb_tail + 1;
-		t &= (MOVEBUFFER_SIZE - 1);
+    uint8_t t = MB_NEXT(mb_tail);
 		DDA* current_movebuffer = &movebuffer[t];
-		// tail must be set before setTimer call as setTimer
-		// reenables the timer interrupt, potentially exposing
-		// mb_tail to the timer interrupt routine. 
+    // Tail must be set before calling timer_set(), as timer_set() reenables
+    // the timer interrupt, potentially exposing mb_tail to the timer
+    // interrupt routine.
 		mb_tail = t;
 		if (current_movebuffer->waitfor_temp) {
 			serial_writestr_P(PSTR("Waiting for target temp\n"));
 			current_movebuffer->live = 1;
-			setTimer(HEATER_WAIT_TIMEOUT);
+      timer_set(HEATER_WAIT_TIMEOUT, 0);
 		}
 		else {
 			dda_start(current_movebuffer);
 		}
-	} 
+	}
 }
 
 /// DEBUG - print queue.
 /// Qt/hs format, t is tail, h is head, s is F/full, E/empty or neither
 void print_queue() {
-	sersendf_P(PSTR("Q%d/%d%c"), mb_tail, mb_head, (queue_full()?'F':(queue_empty()?'E':' ')));
+  sersendf_P(PSTR("Queue: %d/%d%c\n"), mb_tail, mb_head, (queue_full()?'F':(queue_empty()?'E':' ')));
 }
 
 /// dump queue for emergency stop.

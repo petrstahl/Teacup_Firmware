@@ -6,11 +6,13 @@
 
 // If no time scale specified, use 1/10th real-time for simulator
 #define DEFAULT_TIME_SCALE 10
-
+#include "config_wrapper.h"
 #include "simulator.h"
 #include "data_recorder.h"
 
-uint8_t ACSR;
+void cpu_init(void) {
+}
+
 uint8_t TIMSK1;
 uint16_t
   TCCR0A,
@@ -40,29 +42,48 @@ enum {
 };
 
 int verbose = 1;                ///< 0=quiet, 1=normal, 2=noisy, 3=debug, etc.
+int use_color = 1;              ///< 0=No ANSI colors, 1=Use ANSI colors
+int show_pintous = 0;           ///< Show pin activity on console
 int trace_gcode = 0;            ///< show gcode on the console
 int trace_pos = 0;              ///< show print head position on the console
 
-const char * shortopts = "qgpvt:o::";
+const char * shortopts = "qgpvt:o::T::";
 struct option opts[] = {
+  { "no-color", no_argument, &use_color , 0 },
+  { "color", no_argument, &use_color , 1 },
+  { "pinouts", no_argument, &show_pintous , 1 },
   { "quiet", no_argument, &verbose , 0 },
   { "verbose", no_argument, NULL, 'v' },
   { "gcode", no_argument, NULL, 'g' },
   { "pos", no_argument, NULL, 'p' },
   { "time-scale", required_argument, NULL, 't' },
-  { "tracefile", optional_argument, NULL, 'o' }
+  { "tracefile", optional_argument, NULL, 'o' },
+  { "report-temptable", optional_argument, NULL, 'T' },
+  { 0, 0, 0, 0 }
 };
 
 static void usage(const char *name) {
   printf("Usage:  %s [options] [gcode_file || uart_device_name]\n", name);
-  printf("\n\n");
+  printf("\n");
   printf("   -q || --quiet                 show less output\n");
   printf("   -v || --verbose               show more output\n");
   printf("   -g || --gcode                 show gcode on console as it is processed\n");
   printf("   -p || --pos                   show head position on console\n");
+  printf("   --pinouts                     show pin output activity as letters [A-Pa-p]\n");
+  printf("   --no-color                    Do not use ANSI colors in output\n");
   printf("   -t || --time-scale=n          set time-scale; 0=warp-speed, 1=real-time, 2=half-time, etc.\n");
   printf("   -o || --tracefile[=filename]  write simulator pin trace to 'outfile' (default filename=datalog.out)\n");
-  printf("\n");
+  printf("\n"
+         "   -T || --report-temptable=n    Report calculated temperatures and exit.\n"
+         "\n"
+         "       In Detail, this calculates temperatures for all possible ADC values using\n"
+         "       the compiled-in temperature tables and reports the resulting conversion.\n"
+         "       Does no other run-time simulation; exits after reporting the conversion\n"
+         "       results. Output is suitable for gnuplot, for example like this:\n"
+         "\n"
+         "         gnuplot --persist -e \"plot '< ./sim -T0' u 1:2 with lines,\n"
+         "                                    '< ./sim -T1' u 1:2 with lines\"\n"
+         "\n");
   exit(1);
 }
 
@@ -93,8 +114,11 @@ void sim_start(int argc, char** argv) {
     case 'o':
       recorder_init(optarg ? optarg : "datalog.out");
       break;
+    case 'T':
+      sim_report_temptables(optarg ? atoi(optarg) : -1);
+      exit(0);
     default:
-      sim_error("Unexpected result in getopt_long handler");
+      exit(1);
     }
 
   // Record the command line arguments to the datalog, if active
@@ -140,17 +164,24 @@ void sim_start(int argc, char** argv) {
   NAME_PIN(E_ENABLE_PIN);
 
   NAME_PIN(STEPPER_ENABLE_PIN);
+
+  // Rarely used; uncomment here if you want to see them in the datalog.
+  //NAME_PIN(X_MAX_PIN);
+  //NAME_PIN(Y_MAX_PIN);
+  //NAME_PIN(Z_MAX_PIN);
+  //NAME_PIN(PS_ON_PIN);
+  //NAME_PIN(PS_MOSFET_PIN);
 }
 
 /* -- debugging ------------------------------------------------------------ */
 
-static void fgreen(void) { fputs("\033[0;32m" , stdout); }
-static void fred(void)   { fputs("\033[0;31m" , stdout); }
-static void fcyan(void)  { fputs("\033[0;36m" , stdout); }
-static void fyellow(void){ fputs("\033[0;33;1m" , stdout); }
-static void fbreset(void) { fputs("\033[m" , stdout); }
+static void fgreen(void) { if (use_color) fputs("\033[0;32m" , stdout); }
+static void fred(void)   { if (use_color) fputs("\033[0;31m" , stdout); }
+static void fcyan(void)  { if (use_color) fputs("\033[0;36m" , stdout); }
+static void fyellow(void){ if (use_color) fputs("\033[0;33;1m" , stdout); }
+static void fbreset(void){ if (use_color) fputs("\033[m" , stdout); }
 
-static void bred(void)   { fputs("\033[0;41m" , stdout); }
+static void bred(void)   { if (use_color) fputs("\033[0;41m" , stdout); }
 
 static void vsim_info_cont(const char fmt[], va_list ap) {
   if (verbose < 1) return;
@@ -197,14 +228,14 @@ void sim_debug(const char fmt[], ...) {
 }
 
 void sim_tick(char ch) {
-  if (verbose < 2) return;
+  if (!show_pintous) return;
   fcyan();
   fprintf(stdout, "%c", ch);
   fbreset();
   fflush(stdout);
 }
 
-static char gcode_buffer[300]; 
+static char gcode_buffer[300];
 static int gcode_buffer_index;
 void sim_gcode_ch(char ch) {
   // Got CR, LF or buffer full
@@ -280,17 +311,26 @@ void cli(void) {
 #define in  false
 
 enum { X_AXIS, Y_AXIS, Z_AXIS, E_AXIS , AXIS_MAX , AXIS_NONE };
-static int pos[AXIS_MAX];            ///< Current position in steps
+static int pos[AXIS_MAX];            ///< Current position in 2 * steps
 
 static bool direction[PIN_NB];
 static bool state[PIN_NB];
 
+static int prev_pos[AXIS_MAX];            ///< last reported position
 static void print_pos(void) {
   char * axis = "xyze";
   int i;
+
+  // Only print axes if different from last report
+  for ( i = X_AXIS ; i < AXIS_MAX ; i++ )
+    if (pos[i]/2 != prev_pos[i]/2) break;
+  if (i == AXIS_MAX) return;
+  for ( i = X_AXIS ; i < AXIS_MAX ; i++ )
+    prev_pos[i] = pos[i];
+
   if (trace_pos) {
     for ( i = X_AXIS ; i < AXIS_MAX ; i++ ) {
-      sim_info_cont("%c:%5d   ", axis[i], pos[i]);
+      sim_info_cont("%c:%5d   ", axis[i], pos[i] / 2);
     }
     if (verbose > 1)
       clearline();
@@ -299,13 +339,15 @@ static void print_pos(void) {
   }
 }
 
-bool READ(pin_t pin) {
+bool _READ(pin_t pin) {
   sim_assert(pin < PIN_NB, "READ: Pin number out of range");
   // Add any necessary reactive pin-handlers here.
   return state[pin];
 }
 
-void WRITE(pin_t pin, bool s) {
+static void sim_endstop(int axis);
+
+void _WRITE(pin_t pin, bool s) {
   bool old_state = state[pin];
   uint64_t nseconds = sim_runtime_ns();
   sim_assert(pin < PIN_NB, "WRITE: Pin number out of range");
@@ -369,20 +411,98 @@ void WRITE(pin_t pin, bool s) {
     default:
       break;
     }
+    switch ( axis ) {
+      #ifdef KINEMATICS_COREXY
+        case X_AXIS:
+          pos[X_AXIS] += dir;
+          pos[Y_AXIS] += dir;
+          break;
+        case Y_AXIS:
+          pos[X_AXIS] += dir;
+          pos[Y_AXIS] -= dir;
+          break;
+      #endif
+      case Z_AXIS:
+      case E_AXIS:
+      default:
+        pos[axis] += 2 * dir;
+        break;
+      case AXIS_NONE:
+        break;
+    }
     if ( axis != AXIS_NONE ) {
-      pos[axis] += dir;
-      record_pin(TRACE_POS + axis, pos[axis], nseconds);
-      print_pos();
+      for (int a = X_AXIS; a <= E_AXIS; a++)
+        record_pin(TRACE_POS + axis, pos[axis] / 2, nseconds);
+
+      static uint64_t prev_ns = -1;
+      if (prev_ns != nseconds)
+        print_pos();
+      prev_ns = nseconds;
+
+      for (int a = X_AXIS; a < E_AXIS; a++)
+        sim_endstop(a);
     }
   }
 }
 
-void SET_OUTPUT(pin_t pin) {
+/**
+  Simulate min endstops.  "on" at -10, "off" at 0.
+*/
+static void sim_endstop( int axis ) {
+  bool on ;
+
+  if (axis == AXIS_NONE)        return;
+  else if (pos[axis] <= -20)    on = true;
+  else if (pos[axis] >= 0)      on = false;
+  else                          return ;
+
+  const char * strstate = on ? "ON" : "OFF";
+  int minpin;
+  switch (axis) {
+    case X_AXIS:
+      #ifdef X_INVERT_MIN
+        on = ! on;
+      #endif
+      minpin = X_MIN_PIN;
+      break;
+    case Y_AXIS:
+      #ifdef Y_INVERT_MIN
+        on = ! on;
+      #endif
+      minpin = Y_MIN_PIN;
+      break;
+    case Z_AXIS:
+      #ifdef Z_INVERT_MIN
+        on = ! on;
+      #endif
+      minpin = Z_MIN_PIN;
+      break;
+    default:
+      return;
+  }
+
+  // No change
+  if (state[minpin] == on) return;
+
+  // Change the endstop state and report it
+  state[minpin] = on;
+  record_pin(TRACE_PINS + minpin, on, sim_runtime_ns());
+  bred();
+  if (on)
+    sim_tick('A' + minpin);
+  else
+    sim_tick('a' + minpin);
+  fbreset();
+
+  sim_info("%c-Endstop: %s", "XYZE???"[axis], strstate);
+}
+
+void _SET_OUTPUT(pin_t pin) {
   sim_assert(pin < PIN_NB, "Pin number out of range");
   direction[pin] = out;
 }
 
-void SET_INPUT(pin_t pin) {
+void _SET_INPUT(pin_t pin) {
   sim_assert(pin < PIN_NB, "Pin number out of range");
   direction[pin] = in;
 }

@@ -14,9 +14,21 @@
 #include	"sersendf.h"
 
 #include	"gcode_process.h"
-#ifdef SIMULATOR
-  #include "simulator.h"
-#endif
+
+
+/** Bitfield for available sources of G-code.
+
+  A typical source is the SD card or canned G-code. Serial is currently never
+  turned off.
+*/
+enum gcode_source gcode_sources = GCODE_SOURCE_SERIAL;
+
+/** Bitfield for the current source of G-code.
+
+  Only one bit should be set at a time. The bit is set at start reading a
+  line and cleared when a line is done.
+*/
+enum gcode_source gcode_active = 0;
 
 /// current or previous gcode word
 /// for working out what to do with data just received
@@ -30,6 +42,12 @@ decfloat BSS read_digit;
 
 /// this is where we store all the data for the current command before we work out what to do with it
 GCODE_COMMAND BSS next_target;
+
+#ifdef SD
+  #define STR_BUF_LEN 13
+  char gcode_str_buf[STR_BUF_LEN];
+  static uint8_t str_buf_ptr = 0;
+#endif
 
 /*
 	decfloat_to_int() is the weakest subject to variable overflow. For evaluation, we assume a build room of +-1000 mm and STEPS_PER_MM_x between 1.000 and 4096. Accordingly for metric units:
@@ -93,9 +111,16 @@ void gcode_init(void) {
 	#endif
 }
 
-/// Character Received - add it to our command
-/// \param c the next character to process
-void gcode_parse_char(uint8_t c) {
+/** Character received - add it to our command.
+
+  \param c The next character to process.
+
+  \return Whether end of line was reached.
+
+  This parser operates character by character, so there's no need for a
+  buffer holding the entire line of G-code.
+*/
+uint8_t gcode_parse_char(uint8_t c) {
 	uint8_t checksum_char = c;
 
 	// uppercase
@@ -104,11 +129,20 @@ void gcode_parse_char(uint8_t c) {
 #ifdef SIMULATOR
   sim_gcode_ch(c);
 #endif
-	// process previous field
-	if (last_field) {
-		// check if we're seeing a new field or end of line
-		// any character will start a new field, even invalid/unknown ones
-		if ((c >= 'A' && c <= 'Z') || c == '*' || (c == 10) || (c == 13)) {
+
+  // An asterisk is a quasi-EOL and always ends all fields.
+  if (c == '*') {
+    next_target.seen_semi_comment = next_target.seen_parens_comment =
+    next_target.read_string = 0;
+  }
+
+  // Skip comments and strings.
+  if (next_target.seen_semi_comment == 0 &&
+      next_target.seen_parens_comment == 0 &&
+      next_target.read_string == 0
+     ) {
+    // Check if the field has ended. Either by a new field, space or EOL.
+    if (last_field && (c < '0' || c > '9') && c != '.') {
 			switch (last_field) {
 				case 'G':
 					next_target.G = read_digit.mantissa;
@@ -117,6 +151,14 @@ void gcode_parse_char(uint8_t c) {
 					break;
 				case 'M':
 					next_target.M = read_digit.mantissa;
+          #ifdef SD
+            if (next_target.M == 23) {
+              // SD card command with a filename.
+              next_target.read_string = 1;  // Reset by string handler or EOL.
+              str_buf_ptr = 0;
+              last_field = 0;
+            }
+          #endif
 					if (DEBUG_ECHO && (debug_flags & DEBUG_ECHO))
 						serwrite_uint8(next_target.M);
 					break;
@@ -150,7 +192,7 @@ void gcode_parse_char(uint8_t c) {
 					else
             next_target.target.axis[E] = decfloat_to_int(&read_digit, 1000);
 					if (DEBUG_ECHO && (debug_flags & DEBUG_ECHO))
-            serwrite_uint32(next_target.target.axis[E]);
+            serwrite_int32(next_target.target.axis[E]);
 					break;
 				case 'F':
 					// just use raw integer, we need move distance and n_steps to convert it to a useful value, so wait until we have those to convert it
@@ -196,17 +238,12 @@ void gcode_parse_char(uint8_t c) {
 						serwrite_uint8(next_target.checksum_read);
 					break;
 			}
-			// reset for next field
-			last_field = 0;
-			read_digit.sign = read_digit.mantissa = read_digit.exponent = 0;
 		}
-	}
 
-	// skip comments
-	if (next_target.seen_semi_comment == 0 && next_target.seen_parens_comment == 0) {
 		// new field?
 		if ((c >= 'A' && c <= 'Z') || c == '*') {
 			last_field = c;
+      read_digit.sign = read_digit.mantissa = read_digit.exponent = 0;
 			if (DEBUG_ECHO && (debug_flags & DEBUG_ECHO))
 				serial_writechar(c);
 		}
@@ -275,10 +312,10 @@ void gcode_parse_char(uint8_t c) {
 
         // comments
         case ';':
-          next_target.seen_semi_comment = 1;
+          next_target.seen_semi_comment = 1;    // Reset by EOL.
           break;
         case '(':
-          next_target.seen_parens_comment = 1;
+          next_target.seen_parens_comment = 1;  // Reset by ')' or EOL.
           break;
 
         // now for some numeracy
@@ -347,9 +384,9 @@ void gcode_parse_char(uint8_t c) {
 				#endif
 				) {
 				// process
-				serial_writestr_P(PSTR("ok "));
 				process_gcode_command();
-				serial_writechar('\n');
+
+        // Acknowledgement ("ok") is sent in the main loop, in mendel.c.
 
 				// expect next line number
 				if (next_target.seen_N == 1)
@@ -371,8 +408,10 @@ void gcode_parse_char(uint8_t c) {
 			next_target.seen_P = next_target.seen_T = next_target.seen_N = \
       next_target.seen_G = next_target.seen_M = next_target.seen_checksum = \
       next_target.seen_semi_comment = next_target.seen_parens_comment = \
-      next_target.checksum_read = next_target.checksum_calculated = 0;
-		// last_field and read_digit are reset above already
+      next_target.read_string = next_target.checksum_read = \
+      next_target.checksum_calculated = 0;
+      last_field = 0;
+      read_digit.sign = read_digit.mantissa = read_digit.exponent = 0;
 
 		if (next_target.option_all_relative) {
       next_target.target.axis[X] = next_target.target.axis[Y] = next_target.target.axis[Z] = 0;
@@ -380,7 +419,26 @@ void gcode_parse_char(uint8_t c) {
 		if (next_target.option_all_relative || next_target.option_e_relative) {
       next_target.target.axis[E] = 0;
 		}
+
+    return 1;
 	}
+
+  #ifdef SD
+  // Handle string reading. After checking for EOL.
+  if (next_target.read_string) {
+    if (c == ' ') {
+      if (str_buf_ptr)
+        next_target.read_string = 0;
+    }
+    else if (str_buf_ptr < STR_BUF_LEN) {
+      gcode_str_buf[str_buf_ptr] = c;
+      str_buf_ptr++;
+      gcode_str_buf[str_buf_ptr] = '\0';
+    }
+  }
+  #endif /* SD */
+
+  return 0;
 }
 
 /***************************************************************************\

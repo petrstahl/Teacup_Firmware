@@ -39,6 +39,18 @@
   #endif
 #endif
 
+/** \def CPU_TYPE
+  CPU types a user should be able to choose from in configtool. All
+  commented out.
+*/
+//#define CPU_TYPE xxxx
+
+/** \def F_CPU_OPT
+  CPU clock frequencies a user should be able to choose from in configtool.
+  All commented out.
+*/
+//#define F_CPU_OPT xxxx
+
 /** \def F_CPU
 	CPU clock rate
 */
@@ -66,7 +78,8 @@
                         long and crossing toothed belts and a print head moving
                         on the X-Y-plane.
 */
-#define KINEMATICS KINEMATICS_STRAIGHT
+#define KINEMATICS_STRAIGHT
+//#define KINEMATICS_COREXY
 
 
 /** \def STEPS_PER_M
@@ -262,19 +275,31 @@
 	- comment out pins not in use, as this drops the corresponding code and makes operations faster
 */
 
-#include	"arduino.h"
-
 /** \def USE_INTERNAL_PULLUPS
 	internal pullup resistors
 		the ATmega has internal pullup resistors on it's input pins which are counterproductive with the commonly used eletronic endstops, so they should be switched off. For other endstops, like mechanical ones, you may want to uncomment this.
 */
 //#define USE_INTERNAL_PULLUPS
 
+/** \def Z_AUTODISABLE
+  Automatically disable Z axis when not in use. This is useful for printers
+  with a self-locking Z axis, e.g. the various Mendel derivates.
+
+  Other printers have a heavy Z axis or a not self-locking spindle. In that
+  case you should not activate this.
+
+  This option has no effect on controllers with a common stepper enable pin.
+*/
+#define Z_AUTODISABLE
+
 /*
 	user defined pins
 	adjust to suit your electronics,
 	or adjust your electronics to suit this
 */
+
+//#define TX_ENABLE_PIN            xxxx
+//#define RX_ENABLE_PIN            xxxx
 
 #define	X_STEP_PIN						DIO29
 #define	X_DIR_PIN							DIO28
@@ -313,6 +338,7 @@
 //#define	E_INVERT_ENABLE
 
 #define	PS_ON_PIN							DIO15
+//#define PS_INVERT_ON
 //#define PS_MOSFET_PIN         xxxx
 #define STEPPER_ENABLE_PIN		DIO25
 #define	STEPPER_INVERT_ENABLE
@@ -328,6 +354,31 @@
   http://reprap.org/wiki/Teacup_Firmware#Doing_precision_profiling
 */
 #define DEBUG_LED_PIN DIO21
+
+/** \def SD_CARD_SELECT_PIN
+
+  Chip Select pin of the SD card.
+
+  SD cards work over SPI and have a Chip Select or Slave Select (SS) pin.
+  Choose this pin according to where on the board your SD card adapter is
+  connected. Disabling this pin also disables SD card support and makes the
+  firmware binary about 4.5 kB smaller.
+
+  Connecting a device to SPI actually uses 4 signal lines, the other three
+  pins are choosen by Teacup automatically.
+*/
+//#define SD_CARD_SELECT_PIN       xxxx
+
+/** \def MCP3008_SELECT_PIN
+
+  Chip Select pin of the MCP3008 ADC.
+
+  MCP3008/4 analog-digital converter works over SPI and has a Chip Select pin.
+  Choose this pin according to where the MCP3008 is connected. Setting this
+  pin is required only if at least one temperature sensor of type MCP3008 is
+  configured. Else it's ignored.
+*/
+//#define MCP3008_SELECT_PIN       xxxx
 
 
 
@@ -367,12 +418,25 @@
 */
 #define TEMP_EWMA             1.0
 
-/// which temperature sensors are you using? List every type of sensor you use here once, to enable the appropriate code. Intercom is the gen3-style separate extruder board.
-// #define	TEMP_MAX6675
-#define	TEMP_THERMISTOR
-// #define	TEMP_AD595
-// #define	TEMP_PT100
-// #define	TEMP_INTERCOM
+/** \def TEMP_MAX6675 TEMP_THERMISTOR TEMP_AD595 TEMP_PT100 TEMP_INTERCOM
+    \def TEMP_MCP3008
+
+  Which temperature sensor types are you using? Leave all used ones
+  uncommented, comment out all others to save binary size and enhance
+  performance.
+*/
+//#define TEMP_MAX6675
+#define TEMP_THERMISTOR
+//#define TEMP_AD595
+//#define TEMP_PT100
+//#define TEMP_INTERCOM
+//#define TEMP_MCP3008
+
+/** \def TEMP_SENSOR_PIN
+  Temperature sensor pins a user should be able to choose from in configtool.
+  All commented out.
+*/
+//#define TEMP_SENSOR_PIN xxxx
 
 /***************************************************************************\
 *                                                                           *
@@ -383,9 +447,9 @@
 *   TT_PT100, TT_INTERCOM. See list in temp.c.                              *
 *                                                                           *
 * The "additional" field is used for TT_THERMISTOR only. It defines the     *
-* name of the table(s) in ThermistorTable.h to use. Typically, this is      *
-* THERMISTOR_EXTRUDER for the first or only table, or THERMISTOR_BED for    *
-* the second table. See also early in ThermistorTable.{single|double}.h.    *
+* name of the table(s) in thermistortable.h to use. This name is arbitrary, *
+* often used names include THERMISTOR_EXTRUDER and THERMISTOR_BED. Also,    *
+* several sensors can share the same table, which saves binary size.        *
 *                                                                           *
 * For a GEN3 set temp_type to TT_INTERCOM and temp_pin to AIO0. The pin     *
 * won't be used in this case.                                               *
@@ -407,6 +471,14 @@ DEFINE_TEMP_SENSOR(bed,       TT_THERMISTOR,  AIO0,      THERMISTOR_EXTRUDER)
 * 5. HEATERS                                                                *
 *                                                                           *
 \***************************************************************************/
+
+/** \def REPORT_TARGET_TEMPS
+  With this enabled, M105 commands will return the current temperatures along
+  with the target temps, separated by a slash: ok T:xxx.x/xxx.x B:xxx.x/xxx.x
+  With this disabled, only temps will be returned: ok T:xxx.x B:xxx.x
+  Enabling adds 78 bytes to the image.
+*/
+#define REPORT_TARGET_TEMPS
 
 /** \def HEATER_SANITY_CHECK
 	check if heater responds to changes in target temperature, disable and spit errors if not
@@ -435,6 +507,9 @@ DEFINE_TEMP_SENSOR(bed,       TT_THERMISTOR,  AIO0,      THERMISTOR_EXTRUDER)
 * are defined or the order of the definitions differs. The first defined    *
 * device has the index 0 (zero).                                            *
 *                                                                           *
+* Set 'invert' to 0 for normal heaters. Setting it to 1 inverts the pin     *
+* signal for this pin, e.g. for a MOSFET with a driver.                     *
+*                                                                           *
 * Set 'pwm' to ...                                                          *
 *  1  for using PWM on a PWM-able pin and on/off on other pins.             *
 *  0  for using on/off on a PWM-able pin, too.                              *
@@ -448,9 +523,15 @@ DEFINE_TEMP_SENSOR(bed,       TT_THERMISTOR,  AIO0,      THERMISTOR_EXTRUDER)
 	#define DEFINE_HEATER(...)
 #endif
 
-//            name      port   pwm
-DEFINE_HEATER(extruder, DIO4,  1)
-DEFINE_HEATER(bed,      DIO3,  1)
+/** \def HEATER_PIN
+  Heater pins a user should be able to choose from in configtool. All
+  commented out.
+*/
+//#define HEATER_PIN xxxx
+
+//            name      pin      invert  pwm
+DEFINE_HEATER(extruder, DIO4,    0,      1)
+DEFINE_HEATER(bed,      DIO3,    0,      1)
 
 /// and now because the c preprocessor isn't as smart as it could be,
 /// uncomment the ones you've listed above and comment the rest.
@@ -506,14 +587,6 @@ DEFINE_HEATER(bed,      DIO3,  1)
 */
 #define EECONFIG
 
-/** \def DEBUG
-	DEBUG
-		enables /heaps/ of extra output, and some extra M-codes.
-		WARNING: this WILL break most host-side talkers that expect particular responses from firmware such as reprap host and replicatorG
-		use with serial terminal or other suitable talker only.
-*/
-// #define	DEBUG
-
 /** \def BANG_BANG
 BANG_BANG
 drops PID loop from heater control, reduces code size significantly (1300 bytes!)
@@ -549,19 +622,6 @@ PWM value for 'off'
 	Teacup implements a watchdog, which has to be reset every 250ms or it will reboot the controller. As rebooting (and letting the GCode sending application trying to continue the build with a then different Home point) is probably even worse than just hanging, and there is no better restore code in place, this is disabled for now.
 */
 // #define USE_WATCHDOG
-
-/**
-	analog subsystem stuff
-	REFERENCE - which analog reference to use. see analog.h for choices
-*/
-#define	REFERENCE			REFERENCE_AVCC
-
-/** \def STEP_INTERRUPT_INTERRUPTIBLE
-	this option makes the step interrupt interruptible (nested).
-	this should help immensely with dropped serial characters, but may also make debugging infuriating due to the complexities arising from nested interrupts
-	\note disable this option if you're using a '168 or for some reason your ram usage is above 90%. This option hugely increases likelihood of stack smashing.
-*/
-#define		STEP_INTERRUPT_INTERRUPTIBLE	1
 
 /**
 	temperature history count. This is how many temperature readings to keep in order to calculate derivative in PID loop
@@ -608,9 +668,56 @@ PWM value for 'off'
 */
 
 
+
 /***************************************************************************\
 *                                                                           *
-* 8. APPENDIX A - PWMABLE PINS AND MAPPINGS                                 *
+* 8. DISPLAY SUPPORT                                                        *
+*                                                                           *
+\***************************************************************************/
+
+/** \def DISPLAY_BUS_4BIT DISPLAY_BUS_8BIT DISPLAY_BUS_I2C DISPLAY_BUS_SPI
+
+  The bus used to connect the display to the controller. This is a property
+  of the display. With most displays there can be only one correct choice.
+
+  Comment in the one in use, comment out all others. If there is no display,
+  comment out all of them to remove display code for better performance.
+*/
+//#define DISPLAY_BUS_4BIT
+//#define DISPLAY_BUS_8BIT
+//#define DISPLAY_BUS_I2C
+//#define DISPLAY_BUS_SPI
+
+/** \def DISPLAY_RS_PIN DISPLAY_RW_PIN DISPLAY_E_PIN
+    \def DISPLAY_D4_PIN DISPLAY_D5_PIN DISPLAY_D6_PIN DISPLAY_D7_PIN
+
+  Pins necessary for the 4-bit parallel display bus. Taken into account with
+  DISPLAY_BUS_4BIT defined, only.
+*/
+//#define DISPLAY_RS_PIN           xxxx
+//#define DISPLAY_RW_PIN           xxxx
+//#define DISPLAY_E_PIN            xxxx
+//#define DISPLAY_D4_PIN           xxxx
+//#define DISPLAY_D5_PIN           xxxx
+//#define DISPLAY_D6_PIN           xxxx
+//#define DISPLAY_D7_PIN           xxxx
+
+/** \def DISPLAY_TYPE_SSD1306 DISPLAY_TYPE_HD44780
+
+  The type of display in use. There can be only one choice. Taken into account
+  only if one of DISPLAY_BUS_xxx is defined.
+
+  Comment in the display in use, comment out all others. If there is no
+  display, comment out all of DISPLAY_BUS_xxx.
+*/
+//#define DISPLAY_TYPE_SSD1306
+//#define DISPLAY_TYPE_HD44780
+
+
+
+/***************************************************************************\
+*                                                                           *
+* 9. APPENDIX A - PWMABLE PINS AND MAPPINGS                                 *
 *                                                                           *
 *                                                                           *
 * list of PWM-able pins and corresponding timers                            *

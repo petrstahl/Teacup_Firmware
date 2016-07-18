@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 
+#include "dda_queue.h"
 #include "serial.h"
 #include "simulator.h"
 
@@ -60,7 +61,6 @@ static void open_tty(const char *devname)
   sim_assert(serial_fd != -1, "couldn't open serial port");
   sim_assert(isatty(serial_fd), "not a TTY");
 
-  sim_info("configuring port");
   // Get the current options for the port
   if (tcgetattr(serial_fd, &options) != 0) {
     sim_error("tcgetattr");
@@ -96,36 +96,43 @@ uint8_t serial_rxchars(void) {
     ioctl(serial_fd, FIONREAD, &rx_chars_nb);
     return rx_chars_nb;
   }
-  // File always has more data
-  return 1;
+
+  // An open file always has more data
+  if (gcode_fd) return 1;
+
+  // No more gcode data; wait for DDA queue to drain
+  if (queue_empty()) {
+    sim_info("Gcode processing completed.");
+    exit(0);
+  }
+
+  // Nothing to read from
+  return 0;
 }
 
 // read one character
 uint8_t serial_popchar(void) {
-  uint8_t c;
-  ssize_t count;
+  uint8_t c = 0;
+  ssize_t count = 0;
   int fd = serial_fd ? serial_fd : gcode_fd;
 
   sim_assert(serial_initialised, "serial interface not initialised");
   sim_assert(serial_rxchars() > 0, "no chars to read");
-  count = read(fd, &c, 1);
-  if (gcode_fd && !count) {
+  while (fd && !count) {
+    count = read(fd, &c, 1);
+    if (!gcode_fd || count)
+      break;
     // EOF: try to open next file
     open_file();
-    if (gcode_fd || serial_fd)
-      return serial_popchar();
-
-    sim_info("Gcode processing completed.");
-    exit(0);
+    fd = serial_fd ? serial_fd : gcode_fd;
   }
-  sim_assert(count == 1, "no character in serial RX buffer");
   return c;
 }
 
 // send one character
 void serial_writechar(uint8_t data) {
   sim_assert(serial_initialised, "serial interface not initialised");
-  sim_gcode_ch(data);
+  record_comment_stream((char)data);
   if (serial_fd) {
     ssize_t count;
     count = write(serial_fd, &data, 1);
@@ -137,7 +144,7 @@ void serial_writechar(uint8_t data) {
 void serial_writestr(uint8_t *data) {
   const char *str = (char *)data;
   sim_assert(serial_initialised, "serial interface not initialised");
-  sim_gcode(str);
+  record_comment(str);
   if (serial_fd) {
     ssize_t count;
     count = write(serial_fd, str, strlen(str));

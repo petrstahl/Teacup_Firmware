@@ -27,10 +27,10 @@ typedef enum {
 	TT_AD595,
 	TT_PT100,
 	TT_INTERCOM,
+	TT_MCP3008,
 	TT_DUMMY,
 } temp_type_t;
 
-#define	temp_tick temp_sensor_tick
 
 void temp_init(void);
 
