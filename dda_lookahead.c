@@ -17,15 +17,16 @@
 #include "timer.h"
 #include "delay.h"
 #include "dda_queue.h"
-#include "debug.h"
 #include "sersendf.h"
 #include "pinio.h"
 #include "memory_barrier.h"
 
-extern uint8_t use_lookahead;
-
-uint32_t lookahead_joined = 0;      // Total number of moves joined together
-uint32_t lookahead_timeout = 0;     // Moves that did not compute in time to be actually joined
+#ifdef DEBUG
+  // Total number of moves joined together.
+  uint32_t lookahead_joined = 0;
+  // Moves that did not compute in time to be actually joined.
+  uint32_t lookahead_timeout = 0;
+#endif
 
 /// \var maximum_jerk_P
 /// \brief maximum allowed feedrate jerk on each axis
@@ -55,8 +56,8 @@ void dda_find_crossing_speed(DDA *prev, DDA *current) {
   axes_int32_t prevF, currF;
   enum axis_e i;
 
-  // Bail out if there's nothing to join (e.g. G1 F1500).
-  if ( ! prev || prev->nullmove)
+  // Bail out if there's nothing to join (e.g. first movement after a pause).
+  if ( ! prev)
     return;
 
   // We always look at the smaller of both combined speeds,
@@ -72,13 +73,12 @@ void dda_find_crossing_speed(DDA *prev, DDA *current) {
   // Find individual axis speeds.
   // TODO: this is eight expensive muldiv()s. It should be possible to store
   //       currF as prevF for the next calculation somehow, to save 4 of
-  //       these 8 muldiv()s. This would also allow to get rid of
-  //       dda->delta_um[] and using delta_um[] from dda_create() instead.
+  //       these 8 muldiv()s.
   //       Caveat: bail out condition above and some other non-continuous
   //               situations might need some extra code for handling.
   for (i = X; i < AXIS_COUNT; i++) {
-    prevF[i] = muldiv(prev->delta_um[i], F, prev->distance);
-    currF[i] = muldiv(current->delta_um[i], F, current->distance);
+    prevF[i] = muldiv(prev->delta[i], F, prev->total_steps);
+    currF[i] = muldiv(current->delta[i], F, current->total_steps);
   }
 
   if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
@@ -110,7 +110,11 @@ void dda_find_crossing_speed(DDA *prev, DDA *current) {
   max_speed_factor = (uint32_t)2 << 8;
 
   for (i = X; i < AXIS_COUNT; i++) {
-    dv = currF[i] > prevF[i] ? currF[i] - prevF[i] : prevF[i] - currF[i];
+    if (get_direction(prev, i) == get_direction(current, i))
+      dv = currF[i] > prevF[i] ? currF[i] - prevF[i] : prevF[i] - currF[i];
+    else
+      dv = currF[i] + prevF[i];
+
     if (dv) {
       speed_factor = ((uint32_t)pgm_read_dword(&maximum_jerk_P[i]) << 8) / dv;
       if (speed_factor < max_speed_factor)
@@ -171,16 +175,16 @@ void dda_join_moves(DDA *prev, DDA *current) {
   // until then, we do not want to touch the current move settings.
   // Note: we assume 'current' will not be dispatched while this function runs, so we do not to
   // back up the move settings: they will remain constant.
-  uint32_t this_F, this_F_in_steps, this_F_start_in_steps, this_rampup, this_rampdown, this_total_steps;
+  uint32_t this_F, this_F_in_steps, this_F_start_in_steps, this_rampup, this_rampdown, this_total_steps, this_fast_axis;
   uint8_t this_id;
-  static uint32_t la_cnt = 0;     // Counter: how many moves did we join?
   #ifdef LOOKAHEAD_DEBUG
+  static uint32_t la_cnt = 0;     // Counter: how many moves did we join?
   static uint32_t moveno = 0;     // Debug counter to number the moves - helps while debugging
   moveno++;
   #endif
 
-  // Bail out if there's nothing to join (e.g. G1 F1500).
-  if ( ! prev || prev->nullmove || current->crossF == 0)
+  // Bail out if there's nothing to join.
+  if ( ! prev || current->crossF == 0)
     return;
 
     // Show the proposed crossing speed - this might get adjusted below.
@@ -189,20 +193,18 @@ void dda_join_moves(DDA *prev, DDA *current) {
 
   // Make sure we have 2 moves and the previous move is not already active
   if (prev->live == 0) {
-    // Perform an atomic copy to preserve volatile parameters during the calculations
+    // Copy DDA ids to verify later that nothing changed during calculations
     ATOMIC_START
       prev_id = prev->id;
-      prev_F = prev->endpoint.F;
-      prev_F_start_in_steps = prev->start_steps;
-      prev_F_end_in_steps = prev->end_steps;
-      prev_rampup = prev->rampup_steps;
-      prev_rampdown = prev->rampdown_steps;
-      prev_total_steps = prev->total_steps;
-      crossF = current->crossF;
       this_id = current->id;
-      this_F = current->endpoint.F;
-      this_total_steps = current->total_steps;
     ATOMIC_END
+
+    prev_F = prev->endpoint.F;
+    prev_F_start_in_steps = prev->start_steps;
+    prev_total_steps = prev->total_steps;
+    crossF = current->crossF;
+    this_total_steps = current->total_steps;
+    this_fast_axis = current->fast_axis;
 
     // Here we have to distinguish between feedrate along the movement
     // direction and feedrate of the fast axis. They can differ by a factor
@@ -216,9 +218,9 @@ void dda_join_moves(DDA *prev, DDA *current) {
     this_F = muldiv(current->fast_um, current->endpoint.F, current->distance);
     crossF = muldiv(current->fast_um, crossF, current->distance);
 
-    prev_F_in_steps = ACCELERATE_RAMP_LEN(prev_F);
-    this_F_in_steps = ACCELERATE_RAMP_LEN(this_F);
-    crossF_in_steps = ACCELERATE_RAMP_LEN(crossF);
+    prev_F_in_steps = acc_ramp_len(prev_F, this_fast_axis);
+    this_F_in_steps = acc_ramp_len(this_F, this_fast_axis);
+    crossF_in_steps = acc_ramp_len(crossF, this_fast_axis);
 
     // Show the proposed crossing speed - this might get adjusted below
     if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
@@ -295,11 +297,15 @@ void dda_join_moves(DDA *prev, DDA *current) {
       sersendf_P(PSTR("this_F: %lu\n"), this_F_in_steps);
     }
 
-    uint8_t timeout = 0;
+    #ifdef DEBUG
+      uint8_t timeout = 0;
+    #endif
 
     ATOMIC_START
       // Evaluation: determine how we did...
-      lookahead_joined++;
+      #ifdef DEBUG
+        lookahead_joined++;
+      #endif
 
       // Determine if we are fast enough - if not, just leave the moves
       // Note: to test if the previous move was already executed and replaced by a new
@@ -312,16 +318,23 @@ void dda_join_moves(DDA *prev, DDA *current) {
         current->rampdown_steps = this_rampdown;
         current->end_steps = 0;
         current->start_steps = this_F_start_in_steps;
-        la_cnt++;
-      } else
-        timeout = 1;
+        #ifdef LOOKAHEAD_DEBUG
+          la_cnt++;
+        #endif
+      }
+      #ifdef DEBUG
+        else
+          timeout = 1;
+      #endif
     ATOMIC_END
 
     // If we were not fast enough, any feedback will happen outside the atomic block:
-    if(timeout) {
-      sersendf_P(PSTR("// Notice: look ahead not fast enough\n"));
-      lookahead_timeout++;
-    }
+    #ifdef DEBUG
+      if (timeout) {
+        sersendf_P(PSTR("// Notice: look ahead not fast enough\n"));
+        lookahead_timeout++;
+      }
+    #endif
   }
 }
 

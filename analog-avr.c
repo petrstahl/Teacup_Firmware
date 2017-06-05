@@ -9,7 +9,7 @@
 #include	"memory_barrier.h"
 
 
-static uint8_t adc_counter;
+static uint8_t adc_counter = 0;
 static volatile uint16_t BSS adc_result[NUM_TEMP_SENSORS];
 
 //! Configure all registers, start interrupt loop
@@ -32,8 +32,6 @@ void analog_init() {
 			ADCSRB = 0;
 		#endif
 
-		adc_counter = 0;
-
 		// clear analog inputs in the data direction register(s)
 		AIO0_DDR &= ~analog_mask;
 		#ifdef	AIO8_DDR
@@ -46,9 +44,16 @@ void analog_init() {
 			DIDR2 = (analog_mask >> 8) & 0xFF;
 		#endif
 
-		// now we start the first conversion and leave the rest to the interrupt
-		ADCSRA |= MASK(ADIE) | MASK(ADSC);
+    // Enable the ADC.
+    ADCSRA |= MASK(ADIE);
   } /* analog_mask */
+}
+
+/**
+  Start a new ADC conversion.
+*/
+void start_adc() {
+  ADCSRA |= MASK(ADSC);
 }
 
 /*! Analog Interrupt
@@ -77,8 +82,10 @@ ISR(ADC_vect, ISR_NOBLOCK) {
 				ADCSRB &= ~MASK(MUX5);
 		#endif
 
-		// After the mux has been set, start a new conversion
-		ADCSRA |= MASK(ADSC);
+    // If there is another channel to read, start a new conversion.
+    if (adc_counter != 0) {
+      ADCSRA |= MASK(ADSC);
+    }
 	}
 }
 

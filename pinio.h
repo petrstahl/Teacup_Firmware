@@ -7,6 +7,13 @@
 
 #include	"config_wrapper.h"
 
+// Configuration tests.
+#ifdef USE_INTERNAL_PULLDOWNS
+  #ifdef USE_INTERNAL_PULLUPS
+    #error Cant use USE_INTERNAL_PULLUPS and ..._PULLDOWNS at the same time.
+  #endif
+#endif
+
 #ifndef MASK
   /// MASKING- returns \f$2^PIN\f$
   #define MASK(PIN) (1 << PIN)
@@ -51,8 +58,10 @@
 
   /// Enable pullup resistor.
   #define _PULLUP_ON(IO)   _WRITE(IO, 1)
+  /// No such feature on ATmegas.
+  #define _PULLDOWN_ON(IO) atmegas_dont_support_pulldown_resistors()
   /// Disable pullup resistor.
-  #define _PULLUP_OFF(IO)  _WRITE(IO, 0)
+  #define _PULL_OFF(IO)    _WRITE(IO, 0)
 
 #elif defined __ARMEL__
 
@@ -89,13 +98,18 @@
       IO ## _PORT->DIR |= MASK(IO ## _PIN); \
     } while (0)
 
-  /// Enable pullup resistor.
+  /// Enable pullup resistor or switch from pulldown to pullup.
   #define _PULLUP_ON(IO) \
     do { \
       LPC_IOCON->IO ## _CMSIS = (IO ## _OUTPUT | IO_MODEMASK_PULLUP); \
     } while (0)
-  /// Disable pullup resistor.
-  #define _PULLUP_OFF(IO) \
+  /// Enable pulldown resistor or switch from pullup to pulldown.
+  #define _PULLDOWN_ON(IO) \
+    do { \
+      LPC_IOCON->IO ## _CMSIS = (IO ## _OUTPUT | IO_MODEMASK_PULLDOWN); \
+    } while (0)
+  /// Disable pull resistor.
+  #define _PULL_OFF(IO) \
     do { \
       LPC_IOCON->IO ## _CMSIS = (IO ## _OUTPUT | IO_MODEMASK_INACTIVE); \
     } while (0)
@@ -109,7 +123,7 @@
   void _SET_OUTPUT(pin_t pin);
   void _SET_INPUT(pin_t pin);
   #define _PULLUP_ON(IO)   _WRITE(IO, 1)
-  #define _PULLUP_OFF(IO)  _WRITE(IO, 0)
+  #define _PULL_OFF(IO)    _WRITE(IO, 0)
 
 #endif /* __AVR__, __ARMEL__, SIMULATOR */
 
@@ -127,10 +141,12 @@
 /// Set pin as output wrapper.
 #define SET_OUTPUT(IO)  _SET_OUTPUT(IO)
 
-/// Enable pullup resistor.
+/// Enable pullup resistor or switch from pulldown to pullup.
 #define PULLUP_ON(IO)   _PULLUP_ON(IO)
-/// Disable pullup resistor.
-#define PULLUP_OFF(IO)  _PULLUP_OFF(IO)
+/// Enable pulldown resistor or switch from pullup to pulldown.
+#define PULLDOWN_ON(IO) _PULLDOWN_ON(IO)
+/// Disable pull resistor.
+#define PULL_OFF(IO)    _PULL_OFF(IO)
 
 /*
 Power
@@ -371,28 +387,49 @@ inline void endstops_on(void) {
       PULLUP_ON(Z_MAX_PIN);
 		#endif
 	#endif
+
+  #ifdef USE_INTERNAL_PULLDOWNS
+    #ifdef X_MIN_PIN
+      PULLDOWN_ON(X_MIN_PIN);
+    #endif
+    #ifdef X_MAX_PIN
+      PULLDOWN_ON(X_MAX_PIN);
+    #endif
+    #ifdef Y_MIN_PIN
+      PULLDOWN_ON(Y_MIN_PIN);
+    #endif
+    #ifdef Y_MAX_PIN
+      PULLDOWN_ON(Y_MAX_PIN);
+    #endif
+    #ifdef Z_MIN_PIN
+      PULLDOWN_ON(Z_MIN_PIN);
+    #endif
+    #ifdef Z_MAX_PIN
+      PULLDOWN_ON(Z_MAX_PIN);
+    #endif
+  #endif
 }
 
 static void endstops_off(void) __attribute__ ((always_inline));
 inline void endstops_off(void) {
-	#ifdef USE_INTERNAL_PULLUPS
+  #if (defined USE_INTERNAL_PULLUPS) || (defined USE_INTERNAL_PULLDOWNS)
 		#ifdef X_MIN_PIN
-      PULLUP_OFF(X_MIN_PIN);
+      PULL_OFF(X_MIN_PIN);
 		#endif
 		#ifdef X_MAX_PIN
-      PULLUP_OFF(X_MAX_PIN);
+      PULL_OFF(X_MAX_PIN);
 		#endif
 		#ifdef Y_MIN_PIN
-      PULLUP_OFF(Y_MIN_PIN);
+      PULL_OFF(Y_MIN_PIN);
 		#endif
 		#ifdef Y_MAX_PIN
-      PULLUP_OFF(Y_MAX_PIN);
+      PULL_OFF(Y_MAX_PIN);
 		#endif
 		#ifdef Z_MIN_PIN
-      PULLUP_OFF(Z_MIN_PIN);
+      PULL_OFF(Z_MIN_PIN);
 		#endif
 		#ifdef Z_MAX_PIN
-      PULLUP_OFF(Z_MAX_PIN);
+      PULL_OFF(Z_MAX_PIN);
 		#endif
 	#endif
 }

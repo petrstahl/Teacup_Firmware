@@ -171,12 +171,28 @@
 \***************************************************************************/
 
 /** \def USE_INTERNAL_PULLUPS
-  The ATmega has internal pullup resistors on it's input pins which are
-  counterproductive with the commonly used eletronic endstops, so they should
-  be switched off. For other endstops, like mechanical ones, you may want to
-  uncomment this.
+
+  Most controller chips feature internal pullup resistors on their input pins,
+  which get used for endstops by turning on this switch. Don't turn it on when
+  using endstops which need no pull resistor, e.g. optical endstops, because
+  pull resistors are counterproductive there.
+
+  One can't use USE_INTERNAL_PULLUPS and USE_INTERNAL_PULLDOWNS at the same
+  time, of course.
 */
 //#define USE_INTERNAL_PULLUPS
+
+/** \def USE_INTERNAL_PULLDOWNS
+
+  Some controller chips feature internal pulldown resistors on their input
+  pins, which get used for endstops by turning on this switch. Don't turn it
+  on when using endstops which need no pull resistor, e.g. optical endstops,
+  because pull resistors are counterproductive there.
+
+  One can't use USE_INTERNAL_PULLDOWNS and USE_INTERNAL_PULLUPS at the same
+  time, of course.
+*/
+//#define USE_INTERNAL_PULLDOWNS
 
 /** \def Z_AUTODISABLE
   Automatically disable Z axis when not in use. This is useful for printers
@@ -208,17 +224,18 @@
 #define TEMP_RESIDENCY_TIME      60
 
 /** \def TEMP_EWMA
+
   Smooth noisy temperature sensors. Good hardware shouldn't be noisy. Set to
-  1.0 for unfiltered data (and a 140 bytes smaller binary).
+  1000 for unfiltered data (and a 140 bytes smaller binary).
 
   Instrument Engineer's Handbook, 4th ed, Vol 2 p126 says values of
-  0.05 to 0.1 are typical. Smaller is smoother but slower adjusting, larger is
+  50 to 100 are typical. Smaller is smoother but slower adjusting, larger is
   quicker but rougher. If you need to use this, set the PID parameter to zero
   (M132 S0) to make the PID loop insensitive to noise.
 
-    Valid range: 0.001 to 1.0
+    Valid range: 1 to 1000
 */
-#define TEMP_EWMA                1.0
+#define TEMP_EWMA                1000
 
 /** \def REPORT_TARGET_TEMPS
   With this enabled, M105 commands will return the current temperatures along

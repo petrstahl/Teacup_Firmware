@@ -49,10 +49,23 @@
   #error REFERENCE undefined. See analog.h on how to choose it.
 #endif
 
+/** \def NEEDS_START_ADC
+
+  Whether the board needs and implements start_adc(), i.e. analog reads
+  on-demand (as opposed to free-running ADC conversions).
+
+  Currently only implemented on AVR.
+*/
+#define NEEDS_START_ADC
+
 #endif /* __AVR__ */
 
 void 			analog_init(void);
 
 uint16_t	analog_read(uint8_t index);
+
+#ifdef NEEDS_START_ADC
+  void start_adc(void);
+#endif
 
 #endif	/* _ANALOG_H */

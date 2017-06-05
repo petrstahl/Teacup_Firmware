@@ -36,7 +36,7 @@ mkfifo ${PIPE_OUT_FILE} || exit 1
 if [ "${USER_CONFIG}" ]; then
   CONFIG="${USER_CONFIG}"
   TEACUP_ELF="${USER_CONFIG%.h}/teacup.elf"
-  TEACUP_ELF="../build/${TEACUP_ELF#../}"
+  TEACUP_ELF="../build/testcases/${TEACUP_ELF#../}"
 else
   CONFIG="../config.h"
   TEACUP_ELF="../build/teacup.elf"
@@ -46,8 +46,8 @@ echo "Taking Teacup binary ${TEACUP_ELF}."
 
 # Prepare statistics.
 echo                             > ${STATISTICS_FILE}
-(cd .. && echo make USER_CONFIG="${USER_CONFIG}" size) | \
-  tail -4                       >> ${STATISTICS_FILE}
+(cd .. && make USER_CONFIG="testcases/${CONFIG}" size) | \
+  tail -5 | head -4             >> ${STATISTICS_FILE}
 
 
 # Prepare a pin tracing file, assuming a Gen7-v1.4 configuration. See

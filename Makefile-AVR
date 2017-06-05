@@ -132,19 +132,21 @@ CFLAGS += -Os
 CFLAGS += -ffunction-sections
 CFLAGS += -finline-functions-called-once
 CFLAGS += -mcall-prologues
+CFLAGS += -flto
 CFLAGS += -Wa,-adhlns=$(@:.o=.al)
 #CFLAGS += -dM -E # To list all predefined macros into the .o file.
 
-#LDFLAGS  = -Wl,--as-needed
-LDFLAGS  = -Wl
+LDFLAGS  = -Wl,--as-needed
+LDFLAGS += -Wl,--gc-sections
 
 ifneq ($(realpath ../simulavr/src/simulavr_info.h),)
   # Neccessary for simulavr support, doesn't hurt others.
   CFLAGS += -DSIMINFO
   LDFLAGS += -Wl,--section-start=.siminfo=0x900000
-else
-  # Doesn't work for simulavr, can't allow dead code removal.
-  LDFLAGS += -Wl,--gc-sections
+  LDFLAGS += -u siminfo_device
+  LDFLAGS += -u siminfo_cpufrequency
+  LDFLAGS += -u siminfo_serial_in
+  LDFLAGS += -u siminfo_serial_out
 endif
 
 LIBS  = -lm
@@ -177,3 +179,27 @@ size: $(BUILDDIR)/$(PROGRAM).elf
 	$(call show_size,Program,14,30,62,126)
 	$(call show_size,Data,1,2,4,8)
 	$(call show_size,EEPROM,1,2,2,4)
+
+.PHONY: simulavr-check simulavr performancetest
+simulavr-check:
+	@if [ ! -x ../simulavr/src/simulavr ]; then \
+	  echo "Can't find SimulAVR executable in ../simulavr/src/simulavr."; \
+	  echo "Please install and build it next to the Teacup_Firmware folder."; \
+	  echo "Sources can be found at https://github.com/Traumflug/simulavr"; \
+	  false; \
+	fi
+
+simulavr:
+	@$(MAKE) --no-print-directory -f Makefile-AVR simulavr-check
+	@echo "Compiling for SimulAVR and running the result in SimulAVR."
+	$(MAKE) -f Makefile-AVR USER_CONFIG=testcases/config.h.Profiling \
+	  MCU=atmega644 F_CPU=20000000UL all
+	../simulavr/src/simulavr -f build/testcases/config.h.Profiling/teacup.elf
+
+performancetest:
+	@$(MAKE) --no-print-directory -f Makefile-AVR simulavr-check
+	@echo "Compiling for SimulAVR and running performance tests."
+	$(MAKE) -f Makefile-AVR USER_CONFIG=testcases/config.h.Profiling \
+	  MCU=atmega644 F_CPU=20000000UL all
+	cd testcases && USER_CONFIG=config.h.Profiling \
+	  ./run-in-simulavr.sh short-moves.gcode smooth-curves.gcode triangle-odd.gcode

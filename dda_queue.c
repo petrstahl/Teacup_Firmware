@@ -16,10 +16,12 @@
 #include "cpu.h"
 #include	"memory_barrier.h"
 
-/// movebuffer head pointer. Points to the last move in the queue.
-/// this variable is used both in and out of interrupts, but is
-/// only written outside of interrupts.
-uint8_t	mb_head = 0;
+/**
+  Movebuffer head pointer. Points to the last move in the queue. This variable
+  is used both in and out of interrupts, but is only written outside of
+  interrupts.
+*/
+static uint8_t mb_head = 0;
 
 /// movebuffer tail pointer. Points to the currently executing move
 /// this variable is read/written both in and out of interrupts.
@@ -34,6 +36,12 @@ uint8_t	mb_tail = 0;
 /// The size does not need to be a power of 2 anymore!
 DDA BSS movebuffer[MOVEBUFFER_SIZE];
 
+/**
+  Pointer to the currently ongoing movement, or NULL, if there's no movement
+  ongoing. Actually a cache of movebuffer[mb_tail].
+*/
+DDA *mb_tail_dda;
+
 /// Find the next DDA index after 'x', where 0 <= x < MOVEBUFFER_SIZE
 #define MB_NEXT(x) ((x) < MOVEBUFFER_SIZE - 1 ? (x) + 1 : 0)
 
@@ -43,58 +51,32 @@ uint8_t queue_full() {
   return MB_NEXT(mb_head) == mb_tail;
 }
 
-/// check if the queue is completely empty
-uint8_t queue_empty() {
-  uint8_t result;
-
-  ATOMIC_START
-    result = (mb_tail == mb_head && movebuffer[mb_tail].live == 0);
-  ATOMIC_END
-
-	return result;
-}
-
-/// Return the current movement, or NULL, if there's no movement going on.
-DDA *queue_current_movement() {
-  DDA* current;
-
-  ATOMIC_START
-    current = &movebuffer[mb_tail];
-
-    if ( ! current->live || current->waitfor_temp || current->nullmove)
-      current = NULL;
-  ATOMIC_END
-
-  return current;
-}
-
 // -------------------------------------------------------
 // This is the one function called by the timer interrupt.
 // It calls a few other functions, though.
 // -------------------------------------------------------
 /// Take a step or go to the next move.
 void queue_step() {
-	// do our next step
-	DDA* current_movebuffer = &movebuffer[mb_tail];
-	if (current_movebuffer->live) {
-		if (current_movebuffer->waitfor_temp) {
-      timer_set(HEATER_WAIT_TIMEOUT, 0);
-			if (temp_achieved()) {
-				current_movebuffer->live = current_movebuffer->done = 0;
-				serial_writestr_P(PSTR("Temp achieved\n"));
-			}
-      else {
-        temp_print(TEMP_SENSOR_none);
-      }
-		}
-		else {
-			dda_step(current_movebuffer);
-		}
+
+  if (mb_tail_dda != NULL) {
+    dda_step(mb_tail_dda);
 	}
 
-  // Start the next move if this one is done.
-	if (current_movebuffer->live == 0)
-		next_move();
+  /**
+    Start the next move if this one is done and another one is available.
+
+    This needs no atomic protection, because we're in an interrupt already.
+  */
+  if (mb_tail_dda == NULL || ! mb_tail_dda->live) {
+    if (mb_tail != mb_head) {
+      mb_tail = MB_NEXT(mb_tail);
+      mb_tail_dda = &(movebuffer[mb_tail]);
+      dda_start(mb_tail_dda);
+    }
+    else {
+      mb_tail_dda = NULL;
+    }
+  }
 }
 
 /// add a move to the movebuffer
@@ -113,68 +95,46 @@ void enqueue_home(TARGET *t, uint8_t endstop_check, uint8_t endstop_stop_cond) {
   // dda->live, dda->done and dda->wait_for_temp.
   new_movebuffer->allflags = 0;
 
-  if (t != NULL) {
-		new_movebuffer->endstop_check = endstop_check;
-		new_movebuffer->endstop_stop_cond = endstop_stop_cond;
-	}
-	else {
-		// it's a wait for temp
-		new_movebuffer->waitfor_temp = 1;
-	}
+  new_movebuffer->endstop_check = endstop_check;
+  new_movebuffer->endstop_stop_cond = endstop_stop_cond;
   dda_create(new_movebuffer, t);
 
-	// make certain all writes to global memory
-	// are flushed before modifying mb_head.
-	MEMORY_BARRIER();
+  /**
+    It's pointless to queue up movements which don't actually move the stepper,
+    e.g. pure velocity changes or movements shorter than a single motor step.
 
-	mb_head = h;
+    That said, accept movements which do move the steppers by forwarding
+    mb_head. Also kick off movements if it's the first movement after a pause.
+  */
+  if ( ! new_movebuffer->nullmove) {
+    // make certain all writes to global memory
+    // are flushed before modifying mb_head.
+    MEMORY_BARRIER();
 
-  uint8_t isdead;
+    mb_head = h;
 
-  ATOMIC_START
-    isdead = (movebuffer[mb_tail].live == 0);
-  ATOMIC_END
+    if (mb_tail_dda == NULL) {
+      /**
+        Go to the next move.
 
-	if (isdead) {
-    timer_reset();
-		next_move();
-    // Compensate for the cli() in timer_set().
-		sei();
-	}
-}
-
-/// go to the next move.
-/// be aware that this is sometimes called from interrupt context, sometimes not.
-/// Note that if it is called from outside an interrupt it must not/can not
-/// be interrupted such that it can be re-entered from within an interrupt.
-/// The timer interrupt MUST be disabled on entry. This is ensured because
-/// the timer was disabled at the start of the ISR or else because the current
-/// move buffer was dead in the non-interrupt case (which indicates that the
-/// timer interrupt is disabled).
-void next_move() {
-	while ((queue_empty() == 0) && (movebuffer[mb_tail].live == 0)) {
-		// next item
-    uint8_t t = MB_NEXT(mb_tail);
-		DDA* current_movebuffer = &movebuffer[t];
-    // Tail must be set before calling timer_set(), as timer_set() reenables
-    // the timer interrupt, potentially exposing mb_tail to the timer
-    // interrupt routine.
-		mb_tail = t;
-		if (current_movebuffer->waitfor_temp) {
-			serial_writestr_P(PSTR("Waiting for target temp\n"));
-			current_movebuffer->live = 1;
-      timer_set(HEATER_WAIT_TIMEOUT, 0);
-		}
-		else {
-			dda_start(current_movebuffer);
-		}
+        This is the version used from outside interrupts. The in-interrupt
+        version is inlined (and simplified) in queue_step().
+      */
+      timer_reset();
+      mb_tail = mb_head;  // Valid ONLY if the queue was empty before!
+      mb_tail_dda = new_movebuffer; // Dito!
+      dda_start(mb_tail_dda);
+      // Compensate for the cli() in timer_set().
+      sei();
+    }
 	}
 }
 
 /// DEBUG - print queue.
 /// Qt/hs format, t is tail, h is head, s is F/full, E/empty or neither
 void print_queue() {
-  sersendf_P(PSTR("Queue: %d/%d%c\n"), mb_tail, mb_head, (queue_full()?'F':(queue_empty()?'E':' ')));
+  sersendf_P(PSTR("Queue: %d/%d%c\n"), mb_tail, mb_head,
+             (queue_full() ? 'F' : (mb_tail_dda ? ' ' : 'E')));
 }
 
 /// dump queue for emergency stop.
@@ -186,11 +146,11 @@ void queue_flush() {
   // if the timer were running, this would require
   // wrapping in ATOMIC_START ... ATOMIC_END.
   mb_tail = mb_head;
-  movebuffer[mb_head].live = 0;
+  mb_tail_dda = NULL;
 }
 
 /// wait for queue to empty
 void queue_wait() {
-	while (queue_empty() == 0)
+  while (mb_tail_dda)
 		clock();
 }

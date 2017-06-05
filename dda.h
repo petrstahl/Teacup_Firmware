@@ -41,6 +41,8 @@ typedef struct {
   axes_int32_t axis;
   uint32_t  F;
 
+  uint16_t  e_multiplier;
+  uint16_t  f_multiplier;
   uint8_t   e_relative        :1; ///< bool: e axis relative? Overrides all_relative
 } TARGET;
 
@@ -54,18 +56,15 @@ typedef struct {
 	// bresenham counters
   axes_int32_t      counter; ///< counter for total_steps vs each axis
 
-	// step counters
-  axes_uint32_t     steps;   ///< number of steps on each axis
-
-	#ifdef ACCELERATION_RAMPING
+  #if ! defined ACCELERATION_TEMPORAL
 	/// counts actual steps done
 	uint32_t					step_no;
-	#endif
-	#ifdef ACCELERATION_TEMPORAL
+	#else
   axes_uint32_t     time;       ///< time of the last step on each axis
   uint32_t          last_time;  ///< time of the last step of any axis
 	#endif
 
+  axes_uint32_t   steps;      ///< number of steps on each axis
 	/// Endstop handling.
   uint8_t endstop_stop; ///< Stop due to endstop trigger
   uint8_t debounce_count_x, debounce_count_y, debounce_count_z;
@@ -86,14 +85,11 @@ typedef struct {
 		struct {
 			// status fields
 			uint8_t						nullmove			:1; ///< bool: no axes move, maybe we wait for temperatures or change speed
-			uint8_t						live					:1; ///< bool: this DDA is running and still has steps to do
+			volatile uint8_t  live          :1; ///< bool: this DDA is running and still has steps to do
       uint8_t           done          :1; ///< bool: this DDA is done.
 			#ifdef ACCELERATION_REPRAP
 			uint8_t						accel					:1; ///< bool: speed changes during this move, run accel code
 			#endif
-
-			// wait for temperature to stabilise flag
-			uint8_t						waitfor_temp	:1; ///< bool: wait for temperatures to reach their set values
 
 			// directions
       // As we have muldiv() now, overflows became much less an issue and
@@ -113,7 +109,6 @@ typedef struct {
   // uint8_t        fast_axis;   (see below)
   uint32_t          total_steps; ///< steps of the "fast" axis
   uint32_t          fast_um;     ///< movement length of this fast axis
-  uint32_t          fast_spm;    ///< steps per meter of the fast axis
 
 	uint32_t					c; ///< time until next step, 24.8 fixed point
 
@@ -139,15 +134,11 @@ typedef struct {
   // These two are based on the "fast" axis, the axis with the most steps.
   uint32_t          start_steps; ///< would be required to reach start feedrate
   uint32_t          end_steps; ///< would be required to stop from end feedrate
-  // Displacement vector, in um, based between the difference of the starting
-  // point and the target. Required to obtain the jerk between 2 moves.
-  // Note: x_delta and co are in steps, not um.
-  axes_int32_t      delta_um;
+  #endif
   // Number the moves to be able to test at the end of lookahead if the moves
   // are the same. Note: we do not need a lot of granularity here: more than
   // MOVEBUFFER_SIZE is already enough.
   uint8_t           id;
-  #endif
 	#endif
 	#ifdef ACCELERATION_TEMPORAL
   axes_uint32_t     step_interval;   ///< time between steps on each axis
@@ -182,6 +173,8 @@ extern TARGET current_position;
 	methods
 */
 
+int8_t get_direction(DDA *dda, enum axis_e n);
+
 // initialize dda structures
 void dda_init(void);
 
@@ -189,7 +182,7 @@ void dda_init(void);
 void dda_new_startpoint(void);
 
 // create a DDA
-void dda_create(DDA *dda, TARGET *target);
+void dda_create(DDA *dda, const TARGET *target);
 
 // start a created DDA (called from timer interrupt)
 void dda_start(DDA *dda);

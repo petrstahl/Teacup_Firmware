@@ -1,28 +1,27 @@
-#ifndef	_DDA_QUEUE
-#define	_DDA_QUEUE
 
-#include	"dda.h"
-#include	"timer.h"
+#ifndef _DDA_QUEUE
+#define _DDA_QUEUE
 
-#define HEATER_WAIT_TIMEOUT 1000 MS
+#include "dda.h"
+#include "timer.h"
+
 
 /*
-	variables
+  variables
 */
 
 // this is the ringbuffer that holds the current and pending moves.
-extern uint8_t	mb_head;
-extern uint8_t	mb_tail;
+extern uint8_t mb_tail;
 extern DDA movebuffer[MOVEBUFFER_SIZE];
+extern DDA *mb_tail_dda;
+
 
 /*
-	methods
+  methods
 */
 
 // queue status methods
 uint8_t queue_full(void);
-uint8_t queue_empty(void);
-DDA *queue_current_movement(void);
 
 // take one step
 void queue_step(void);
@@ -36,9 +35,6 @@ inline void enqueue(TARGET *t) {
   enqueue_home(t, 0, 0);
 }
 
-// called from step timer when current move is complete
-void next_move(void);
-
 // print queue status
 void print_queue(void);
 
@@ -48,4 +44,4 @@ void queue_flush(void);
 // wait for queue to empty
 void queue_wait(void);
 
-#endif	/* _DDA_QUEUE */
+#endif /* _DDA_QUEUE */

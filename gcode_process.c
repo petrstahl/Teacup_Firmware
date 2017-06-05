@@ -108,6 +108,7 @@ void process_gcode_command() {
 				//?
 				//? In this case move rapidly to X = 12 mm.  In fact, the RepRap firmware uses exactly the same code for rapid as it uses for controlled moves (see G1 below), as - for the RepRap machine - this is just as efficient as not doing so.  (The distinction comes from some old machine tools that used to move faster if the axes were not driven in a straight line.  For them G0 allowed any movement in space to get to the destination as fast as possible.)
 				//?
+        temp_wait();
 				backup_f = next_target.target.F;
 				next_target.target.F = MAXIMUM_FEEDRATE_X * 2L;
 				enqueue(&next_target.target);
@@ -121,6 +122,7 @@ void process_gcode_command() {
 				//?
 				//? Go in a straight line from the current (X, Y) point to the point (90.6, 13.8), extruding material as the move happens from the current extruded length to a length of 22.4 mm.
 				//?
+        temp_wait();
 				enqueue(&next_target.target);
 				break;
 
@@ -166,13 +168,6 @@ void process_gcode_command() {
 				//?
 				next_target.option_inches = 0;
 				break;
-
-			case 30:
-				//? --- G30: Go home via point ---
-				//?
-				//? Undocumented.
-				enqueue(&next_target.target);
-				// no break here, G30 is move and then go home
 
 			case 28:
 				//? --- G28: Home ---
@@ -452,9 +447,7 @@ void process_gcode_command() {
 				//? --- M101: extruder on ---
 				//?
 				//? Undocumented.
-				if (temp_achieved() == 0) {
-					enqueue(NULL);
-				}
+        temp_wait();
 				#ifdef DC_EXTRUDER
 					heater_set(DC_EXTRUDER, DC_EXTRUDER_PWM);
 				#endif
@@ -616,19 +609,21 @@ void process_gcode_command() {
                         current_position.axis[Z], current_position.axis[E],
 				                current_position.F);
 
-        if (DEBUG_POSITION && (debug_flags & DEBUG_POSITION)) {
-          sersendf_P(PSTR("Endpoint: X:%ld,Y:%ld,Z:%ld,E:%ld,F:%lu,c:%lu}\n"),
-                     movebuffer[mb_tail].endpoint.axis[X],
-                     movebuffer[mb_tail].endpoint.axis[Y],
-                     movebuffer[mb_tail].endpoint.axis[Z],
-                     movebuffer[mb_tail].endpoint.axis[E],
-                     movebuffer[mb_tail].endpoint.F,
-                     #ifdef ACCELERATION_REPRAP
-                       movebuffer[mb_tail].end_c
-                     #else
-                       movebuffer[mb_tail].c
-                     #endif
-          );
+        if (mb_tail_dda != NULL) {
+          if (DEBUG_POSITION && (debug_flags & DEBUG_POSITION)) {
+            sersendf_P(PSTR("Endpoint: X:%ld,Y:%ld,Z:%ld,E:%ld,F:%lu,c:%lu}\n"),
+                       mb_tail_dda->endpoint.axis[X],
+                       mb_tail_dda->endpoint.axis[Y],
+                       mb_tail_dda->endpoint.axis[Z],
+                       mb_tail_dda->endpoint.axis[E],
+                       mb_tail_dda->endpoint.F,
+                       #ifdef ACCELERATION_REPRAP
+                         mb_tail_dda->end_c
+                       #else
+                         mb_tail_dda->c
+                       #endif
+            );
+          }
           print_queue();
         }
 
@@ -655,8 +650,7 @@ void process_gcode_command() {
 				//? Example: M116
 				//?
 				//? Wait for temperatures and other slowly-changing variables to arrive at their set values.
-
-				enqueue(NULL);
+        temp_set_wait();
 				break;
 
       case 119:
@@ -792,6 +786,22 @@ void process_gcode_command() {
 					temp_set(HEATER_BED, next_target.S);
 				#endif
 				break;
+
+      case 220:
+        //? --- M220: Set speed factor override percentage ---
+        if ( ! next_target.seen_S)
+          break;
+        // Scale 100% = 256
+        next_target.target.f_multiplier = (next_target.S * 64 + 12) / 25;
+        break;
+
+      case 221:
+        //? --- M221: Control the extruders flow ---
+        if ( ! next_target.seen_S)
+          break;
+        // Scale 100% = 256
+        next_target.target.e_multiplier = (next_target.S * 64 + 12) / 25;
+        break;
 
       #ifdef DEBUG
 			case 240:

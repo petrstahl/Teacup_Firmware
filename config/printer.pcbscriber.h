@@ -32,18 +32,18 @@
 
     Valid range: 20 to 4'0960'000 (0.02 to 40960 steps/mm)
 */
-#define STEPS_PER_M_X            80000
-#define STEPS_PER_M_Y            80000
-#define STEPS_PER_M_Z            3200000
-#define STEPS_PER_M_E            53844
+#define STEPS_PER_M_X            79000
+#define STEPS_PER_M_Y            79000
+#define STEPS_PER_M_Z            3194000
+#define STEPS_PER_M_E            96271
 
 /** \def MAXIMUM_FEEDRATE_X MAXIMUM_FEEDRATE_Y MAXIMUM_FEEDRATE_Z MAXIMUM_FEEDRATE_E
   Used for G0 rapid moves and as a cap for all other feedrates.
 */
-#define MAXIMUM_FEEDRATE_X       12000
-#define MAXIMUM_FEEDRATE_Y       12000
-#define MAXIMUM_FEEDRATE_Z       240
-#define MAXIMUM_FEEDRATE_E       6000
+#define MAXIMUM_FEEDRATE_X       1000
+#define MAXIMUM_FEEDRATE_Y       1000
+#define MAXIMUM_FEEDRATE_Z       200
+#define MAXIMUM_FEEDRATE_E       1000
 
 /** \def SEARCH_FEEDRATE_X SEARCH_FEEDRATE_Y SEARCH_FEEDRATE_Z
   Used when doing precision endstop search and as default feedrate. No
@@ -73,9 +73,9 @@
     Sane values: 0 to 20000   (0 to 20 mm)
     Valid range: 0 to 1000000
 */
-#define ENDSTOP_CLEARANCE_X      500
-#define ENDSTOP_CLEARANCE_Y      500
-#define ENDSTOP_CLEARANCE_Z      50
+#define ENDSTOP_CLEARANCE_X      1000
+#define ENDSTOP_CLEARANCE_Y      1000
+#define ENDSTOP_CLEARANCE_Z      100
 
 /** \def X_MIN X_MAX Y_MIN Y_MAX Z_MIN Z_MAX
   Soft axis limits. Define them to your machine's size relative to what your
@@ -92,14 +92,14 @@
     Sane values: according to printer build room size
     Valid range: -1000.0 to 1000.0
 */
-#define X_MIN                    -100.0
-#define X_MAX                    100.0
+//#define X_MIN                    0.0
+//#define X_MAX                    200.0
 
-#define Y_MIN                    -100.0
-#define Y_MAX                    100.0
+//#define Y_MIN                    0.0
+//#define Y_MAX                    200.0
 
-#define Z_MIN                    0.0
-#define Z_MAX                    202.44
+//#define Z_MIN                    0.0
+//#define Z_MAX                    140.0
 
 /** \def E_ABSOLUTE
   Some G-code creators produce relative length commands for the extruder,
@@ -127,7 +127,7 @@
     Units: mm/s^2
     Useful range: 1 to 10'000
 */
-#define ACCELERATION             2000
+#define ACCELERATION             100
 
 /** \def LOOKAHEAD
   Define this to enable look-ahead during *ramping* acceleration to smoothly
@@ -158,10 +158,10 @@
     Sane values: 0 to 400
     Valid range: 0 to 65535
 */
-#define MAX_JERK_X               300
-#define MAX_JERK_Y               300
+#define MAX_JERK_X               100
+#define MAX_JERK_Y               100
 #define MAX_JERK_Z               0
-#define MAX_JERK_E               300
+#define MAX_JERK_E               200
 
 
 /***************************************************************************\
@@ -212,7 +212,7 @@
 
     Unit: degree Celsius
 */
-#define TEMP_HYSTERESIS          5
+#define TEMP_HYSTERESIS          10
 
 /** \def TEMP_RESIDENCY_TIME
   Actual temperature must be close to target (within set temperature
