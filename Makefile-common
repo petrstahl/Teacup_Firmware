@@ -91,6 +91,9 @@ $(BUILDDIR)/%.o: %.c | $(BUILDDIR)
 
 $(BUILDDIR)/%.elf: $(OBJ)
 	@echo "  LINK      $@"
+	@echo " LDFLAGS $(LDFLAGS)"
+	@echo " CFLAGS $(CFLAGS)"
+	@echo " LIBS $(LIBS)"
 	@$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 $(BUILDDIR)/%.lst: $(BUILDDIR)/%.elf
